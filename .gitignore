@@ -23,3 +23,10 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+
+# Raw video-export frame dumps (large; outputs live in mascot_frames/)
+ezgif-*-png-split/
+
+# Python
+__pycache__/
+*.pyc
