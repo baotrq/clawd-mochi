@@ -1,6 +1,6 @@
 <!-- LOGO -->
 <p align="center">
-  <img src="pics/clawd_mochi_banner.png" alt="Clawd Mochi" width="700"/>
+  <img src="pics/clawd_print_face.jpg" alt="Clawd Mochi — 3D-printed desk companion" width="700"/>
 </p>
 
 # Clawd Mochi — Extended Edition 🦀🤖
@@ -19,9 +19,9 @@ A physical desk companion built around **Clawd**, the pixel-crab mascot of Claud
 ---
 
 <p align="center">
-  <img src="pics/clawd_mochi_3_4.jpeg" alt="Assembled Clawd Mochi on a desk" width="480"/>
+  <img src="pics/clawd_print_logo.jpg" alt="Assembled Clawd Mochi showing the Anthropic logo" width="480"/>
   &nbsp;
-  <img src="pics/clawd_mochi_claude_code.jpeg" alt="Claude Code view" width="480"/>
+  <img src="pics/clawd_print_pomodoro.jpg" alt="Clawd Mochi running the Pomodoro focus timer" width="480"/>
 </p>
 
 ---
@@ -50,6 +50,10 @@ A physical desk companion built around **Clawd**, the pixel-crab mascot of Claud
 ## 🕹️ The web controller
 
 > **Live app:** https://baotrq.github.io/clawd-mochi/ *(enable GitHub Pages on your fork to publish your own)*
+
+<p align="center">
+  <img src="pics/web_controller_room.png" alt="Pixel-art web controller room with clickable hotspots" width="700"/>
+</p>
 
 Instead of a form of buttons, the controller is a **room you interact with** — click an object to put Clawd into the matching mode:
 
