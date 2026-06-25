@@ -1,6 +1,8 @@
 <!-- LOGO -->
 <p align="center">
-  <img src="pics/clawd_print_face.jpg" alt="Clawd Mochi — 3D-printed desk companion" width="700"/>
+  <img src="pics/clawd_print_face.jpg" alt="Clawd Mochi — 3D-printed desk companion" width="420"/>
+  &nbsp;
+  <img src="pics/clawd_print_logo.jpg" alt="Clawd Mochi showing the Anthropic logo" width="420"/>
 </p>
 
 # Clawd Mochi — Extended Edition 🦀🤖
@@ -19,9 +21,7 @@ A physical desk companion built around **Clawd**, the pixel-crab mascot of Claud
 ---
 
 <p align="center">
-  <img src="pics/clawd_print_logo.jpg" alt="Assembled Clawd Mochi showing the Anthropic logo" width="480"/>
-  &nbsp;
-  <img src="pics/clawd_print_pomodoro.jpg" alt="Clawd Mochi running the Pomodoro focus timer" width="480"/>
+  <img src="pics/clawd_print_pomodoro.jpg" alt="Clawd Mochi running the Pomodoro focus timer" width="760"/>
 </p>
 
 ---
