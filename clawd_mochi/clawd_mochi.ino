@@ -76,8 +76,14 @@
 
 // ── WiFi (best-effort — this board's radio has previously tested as
 //    unreliable/defective; Serial control above remains the fallback) ──
-const char* AP_SSID = "ClawdMochi";
-const char* AP_PASS = "mochi1234";
+const char* AP_SSID = "baoclaudeslave";
+const char* AP_PASS = "hehedongoc";
+// ── Station mode: fill these in LOCALLY to join your home WiFi and reach the
+//    device at the IP your router assigns (printed to Serial at boot). Leave
+//    STA_SSID empty ("") to stay AP-only. DO NOT commit real WiFi credentials —
+//    this repo is public. If joining fails, the firmware falls back to the AP. ──
+const char* STA_SSID = "";   // <-- your home WiFi name
+const char* STA_PASS = "";   // <-- your home WiFi password
 WebServer   server(80);
 
 // ── Pins ──────────────────────────────────────────────────────
@@ -1690,12 +1696,35 @@ void setup() {
   tft.setRotation(1);
   initColours();
 
-  // ── WiFi AP (best-effort, non-blocking — Serial control works either way)
-  WiFi.mode(WIFI_AP);
-  bool apOk = WiFi.softAP(AP_SSID, AP_PASS, 6, 0, 4);
-  Serial.print("WiFi AP \""); Serial.print(AP_SSID); Serial.print("\": ");
-  Serial.println(apOk ? "started" : "failed to start");
-  Serial.print("AP IP: "); Serial.println(WiFi.softAPIP());
+  // ── WiFi (best-effort — Serial control works either way). Prefer joining your
+  //    home network (STA) if STA_SSID is set; fall back to our own AP otherwise.
+  WiFi.setSleep(false);                       // no modem sleep -> stabler link
+  bool sta = false;
+  if (strlen(STA_SSID) > 0) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(STA_SSID, STA_PASS);
+    Serial.print("Joining WiFi \""); Serial.print(STA_SSID); Serial.print("\" ");
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) {
+      delay(250); Serial.print(".");
+    }
+    Serial.println();
+    sta = (WiFi.status() == WL_CONNECTED);
+  }
+  if (sta) {
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);       // C3 Super Mini bad-antenna: lower TX power is steadier
+    Serial.print("WiFi connected. Browse to http://");
+    Serial.println(WiFi.localIP());
+  } else {
+    if (strlen(STA_SSID) > 0)
+      Serial.println("WiFi join failed — falling back to AP.");
+    WiFi.mode(WIFI_AP);
+    bool apOk = WiFi.softAP(AP_SSID, AP_PASS, 6, 0, 4);
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    Serial.print("WiFi AP \""); Serial.print(AP_SSID); Serial.print("\": ");
+    Serial.println(apOk ? "started" : "failed to start");
+    Serial.print("AP IP: "); Serial.println(WiFi.softAPIP());
+  }
   server.on("/", routeRoot);
   server.on("/cmd", routeCmd);
   server.onNotFound(routeNotFound);

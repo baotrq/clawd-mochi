@@ -35,6 +35,8 @@ Arduino IDE 2.x. Settings (from README, matches this board):
 | CPU Frequency | 160 MHz |
 | Upload Speed | 921600 |
 
+> **WiFi AP is RF-limited, not a config issue.** At boot the firmware reports the AP `started` with IP `192.168.4.1`, but the ESP32-C3 Super Mini's antenna design makes the AP weak/intermittent over the air on these boards — swapping to another board of the same model does not fix it. `setup()` already disables modem sleep and lowers TX power (`WIFI_POWER_8_5dBm`), which is the most-reported mitigation. Serial @115200 is the reliable control surface regardless. (CPU frequency does not fix this; an AP that "worked at 80 MHz" was a lucky intermittent boot.)
+
 Libraries (Library Manager): **Adafruit GFX Library**, **Adafruit ST7735 and ST7789 Library**. WiFi/WebServer come with the ESP32 core.
 
 Open `clawd_mochi/clawd_mochi.ino`, select the port, upload. There is no CLI build/test setup; verification is manual on hardware (or via the Serial Monitor — every command also prints there).
