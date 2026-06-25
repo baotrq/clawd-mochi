@@ -16,15 +16,54 @@
  *     best-effort WiFi AP + web UI — this board's radio has previously
  *     tested as unreliable/defective, so Serial remains the fallback.
  *     AP SSID/password: see AP_SSID / AP_PASS below. IP printed at boot.
- *     w = normal eyes   s = squish eyes   d = terminal   a = logo
- *     1/2/3 = speed      b = toggle backlight     m = dynamic mode
- *     c = show clock     t = set time (HHMM)      p = pomodoro start/stop
- *     r = set alarm (minutes from now, screen flashes when it rings)
- *     single-shot expressions: e=blink f=double-blink g=look-around
- *       h=wink i=sleepy j=surprised k=squint l=nod n=shake o=roll
- *       u=cross-eyed v=tilt-confused x=excited
- *     in terminal: type "exit" + Enter to leave
- *     (no RTC — clock runs off millis(), defaults to 00:00 at boot)
+ *
+ *   ── MODES (switch anytime, even mid-action) ──────────────────
+ *     1 = Animation mode     2 = Clock mode
+ *     3 = Pomodoro mode      4 = Terminal mode
+ *     5 = Usage mode (Claude Pro 5h/7d usage, see U below)
+ *
+ *   ── AUTO-CYCLING (Animation mode only — never interrupts 2/3/4/5) ──
+ *     Idles on Animation by default. At each wall-clock quarter-hour
+ *     (xx:00/15/30/45), auto-pops Clock for 4s then returns. Separately,
+ *     the first time pushed usage crosses
+ *     each new 10% mark (10/20/.../90), or hits 95%, auto-pops Usage
+ *     for 4s then returns — a glanceable nudge as you approach the cap.
+ *
+ *   ── GLOBAL (work in any mode) ─────────────────────────────────
+ *     b = toggle backlight     - / = = speed down / up
+ *     U = push Claude usage stats silently (12 digits + Enter:
+ *         SS WW RRR TTTTT = session%, weekly%, minutes until session
+ *         reset, minutes until weekly reset — e.g. U304801800180\n =
+ *         30% / 48% / resets in 18min / resets in 180min; sent
+ *         automatically by the web app — only visible in Usage mode)
+ *     T = silently sync the clock (HHMM digits + Enter, e.g. T1530\n),
+ *         without switching modes or drawing anything — sent by the web
+ *         app right after connecting, so the device stays on whatever
+ *         it's currently showing (default Animation) while it syncs
+ *
+ *   ── ANIMATION MODE ────────────────────────────────────────────
+ *     w = normal eyes   s = squish eyes   z = logo reveal
+ *     m = toggle dynamic mode (auto-cycles idle expressions)
+ *     single-shot expressions:
+ *       e=blink f=double-blink g=look-around h=wink i=sleepy
+ *       j=surprised k=squint l=nod n=shake o=roll u=cross-eyed
+ *       v=tilt-confused x=excited
+ *
+ *   ── CLOCK MODE ────────────────────────────────────────────────
+ *     t = set time (HHMM)      r = set alarm (minutes from now,
+ *                                   screen flashes when it rings)
+ *
+ *   ── POMODORO MODE ─────────────────────────────────────────────
+ *     p = start/stop (keeps ticking in the background even if you
+ *         switch to another mode — switch back to 3 to check it)
+ *     P = set durations + start in one shot, silently (5 digits + Enter:
+ *         MM SS B = focus minutes, focus seconds, break minutes — e.g.
+ *         P24305\n = 24:30 focus / 5 min break, starts immediately)
+ *
+ *   ── TERMINAL MODE ─────────────────────────────────────────────
+ *     type freely; "exit" + Enter returns to Animation mode
+ *
+ *   (no RTC — clock runs off millis(), defaults to 00:00 at boot)
  * ╚══════════════════════════════════════════════════════════════╝
  */
 
@@ -65,20 +104,19 @@ uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_GREEN;
 #define C_WHITE ST77XX_WHITE
 #define C_BLACK ST77XX_BLACK
 
-// ── State ─────────────────────────────────────────────────────
-#define VIEW_EYES_NORMAL 0
-#define VIEW_EYES_SQUISH 1
-#define VIEW_CODE        2
-#define VIEW_CLOCK       3
-#define VIEW_INPUT       4
-#define VIEW_POMODORO    5
+// ── Modes ─────────────────────────────────────────────────────
+enum Mode { MODE_ANIMATION, MODE_CLOCK, MODE_POMODORO, MODE_TERMINAL, MODE_USAGE };
+Mode currentMode = MODE_ANIMATION;
 
-uint8_t  currentView  = VIEW_EYES_NORMAL;
+// ── Animation-mode sub-state ──────────────────────────────────
+#define EYE_NORMAL 0
+#define EYE_SQUISH 1
+uint8_t  eyeView      = EYE_NORMAL;
 bool     busy         = false;
 bool     backlightOn  = true;
 uint8_t  animSpeed    = 1;   // 1=slow(default) 2=normal 3=fast
 
-bool     dynamicMode    = false;  // auto-cycles idle animations when true
+bool     dynamicMode    = true;   // auto-cycles idle animations when true (on by default)
 uint32_t nextIdleAnimAt = 0;
 
 uint16_t animBgColor  = 0;   // background for eye/logo animations
@@ -87,14 +125,18 @@ uint16_t animBgColor  = 0;   // background for eye/logo animations
 //    unless set with 't'; behaves as a stopwatch until then) ───────────
 uint32_t clockBaseMillis   = 0;
 uint16_t clockBaseMinutes  = 0;   // minutes-since-midnight at clockBaseMillis
-uint32_t nextClockShowAt   = 0;   // next auto popup, every 30 min
+uint16_t lastClockAlertMin = 0xFFFF; // last quarter-hour we auto-popped Clock for
 
-// ── Pomodoro timer ───────────────────────────────────────────────────
+// ── Pomodoro timer (ticks in the background regardless of currentMode) ─
 bool     pomodoroActive    = false;
 bool     pomodoroOnBreak   = false;
 uint32_t pomodoroPhaseStart = 0;
-const uint32_t POMO_WORK_MS  = 25UL * 60000;
-const uint32_t POMO_BREAK_MS =  5UL * 60000;
+bool     pomodoroRinging    = false;
+uint32_t pomoRingingFlashAt = 0;
+bool     pomoRingingFlashOn = false;
+uint32_t pomoWorkMs         = 25UL * 60000;
+uint32_t pomoBreakMs        =  5UL * 60000;
+uint32_t pomoStoppedAt      = 0;
 
 // ── Alarm ────────────────────────────────────────────────────────────
 bool     alarmArmed    = false;
@@ -103,10 +145,53 @@ uint32_t alarmAtMillis = 0;
 uint32_t alarmFlashAt  = 0;
 bool     alarmFlashOn  = false;
 
-// ── Numeric input prompt (used by 't' set-clock and 'r' set-alarm) ───
-enum InputKind { INPUT_NONE, INPUT_CLOCK_SET, INPUT_ALARM_MIN };
+// ── Timer ────────────────────────────────────────────────────────────
+bool     timerActive     = false;
+bool     timerRinging    = false;
+uint32_t timerAtMillis   = 0;
+uint32_t timerDurationMs = 0;
+uint32_t timerFlashAt    = 0;
+bool     timerFlashOn    = false;
+
+// ── Cowsay ───────────────────────────────────────────────────────────
+bool     cowsayActive    = false;
+
+
+// ── Numeric input prompt (used by 't' set-clock, 'r' set-alarm, and
+//    'y' set-timer, Clock-mode-only commands) ──────────────────────────
+enum InputKind { INPUT_NONE, INPUT_CLOCK_SET, INPUT_ALARM_SET, INPUT_TIMER_SEC, INPUT_POMO_WORK, INPUT_POMO_BREAK };
 InputKind inputKind = INPUT_NONE;
 String    inputBuf  = "";
+
+// ── Claude usage push ('U' command — silent, machine-to-device only;
+//    deliberately NOT routed through InputKind/inputBuf above, since that
+//    machinery draws a full-screen "enter a value" prompt meant for humans,
+//    and this gets sent automatically every ~60s by the web app. Payload is
+//    12 fixed-width digits: SS WW RRR TTTTT (session%, weekly%, minutes
+//    until session reset, minutes until weekly reset) — no RTC on this
+//    board, so reset countdowns are tracked locally via millis() from the
+//    moment each push is received, same trick as the alarm/timer code ────
+bool     collectingUsage     = false;
+String   usageBuf            = "";
+int8_t   usageSessionPct     = -1; // -1 = no data yet
+int8_t   usageWeeklyPct      = -1;
+uint16_t usageSessionResetMin = 0; // minutes remaining AT THE TIME OF RECEIPT
+uint16_t usageWeeklyResetMin  = 0;
+uint32_t usageReceivedMillis  = 0;
+
+// ── Silent clock sync ('T' command) — same idea as 'U' above: the web app
+//    sends this automatically right after connecting, and it must NOT flash
+//    Clock mode or any prompt on screen, since the device should stay on
+//    whatever it's currently showing (default Animation) while it syncs ──
+bool   collectingClockSet = false;
+String clockSetBuf        = "";
+
+// ── Silent Pomodoro set+start ('P' command) — same idea as 'U'/'T': sets
+//    durations and starts in one atomic step, no separate f/k/p dance and
+//    no visible prompt overlay. 5 digits: MM SS B (focus min, focus sec,
+//    break min) ──────────────────────────────────────────────────────
+bool   collectingPomoStart = false;
+String pomoStartBuf        = "";
 
 // ── Terminal ──────────────────────────────────────────────────
 #define TERM_COLS      15
@@ -116,7 +201,6 @@ String    inputBuf  = "";
 #define TERM_PAD_X      8
 #define TERM_PAD_Y     18
 
-bool    termMode      = false;
 String  termLines[TERM_ROWS];
 uint8_t termRow       = 0;
 uint8_t termCol       = 0;
@@ -244,7 +328,6 @@ void setBacklight(bool on) {
 }
 
 void initColours() {
-  // C_ORANGE = tft.color565(170, 72, 28);
   C_ORANGE = tft.color565(218, 17, 0);
   C_DARKBG = tft.color565(10,  12,  16);
   C_MUTED  = tft.color565(90,  88,  86);
@@ -271,10 +354,9 @@ void drawLogoFilled(uint16_t bg, uint16_t fg) {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  VIEWS
+//  EYES
 // ═════════════════════════════════════════════════════════════
 
-// Eye helpers — shared constants via #define EYE_*
 inline int16_t eyeLX(int16_t ox) {
   return (DISP_W - (EYE_W * 2 + EYE_GAP)) / 2 + EYE_OX + ox;
 }
@@ -357,18 +439,6 @@ void drawDroopyEyes(int16_t openH) {
   tft.fillRect(rx, cy - halfH,   EYE_W, halfH * 2,   C_BLACK);
 }
 
-void drawCodeView() {
-  termMode = false;
-  tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0,          DISP_W, 4, C_ORANGE);
-  tft.fillRect(0, DISP_H - 4, DISP_W, 4, C_ORANGE);
-  tft.setTextColor(C_ORANGE); tft.setTextSize(4);
-  tft.setCursor((DISP_W - 144) / 2, DISP_H / 2 - 52); tft.print("Claude");
-  tft.setTextColor(C_WHITE);  tft.setTextSize(4);
-  tft.setCursor((DISP_W - 96) / 2,  DISP_H / 2 + 8);  tft.print("Code");
-  tft.fillRect((DISP_W - 96) / 2, DISP_H / 2 + 52, 96, 3, C_ORANGE);
-}
-
 // ═════════════════════════════════════════════════════════════
 //  CLOCK
 // ═════════════════════════════════════════════════════════════
@@ -390,16 +460,123 @@ void drawClockView() {
   tft.print(buf);
 }
 
-// Keep the manually-opened clock view ('c') ticking forward while shown
+// Minutes remaining, counted down locally from when the value was received
+// (no RTC on this board — same trick as armAlarm/armTimer).
+uint16_t usageMinutesRemaining(uint16_t baseMin) {
+  uint32_t elapsedMin = (millis() - usageReceivedMillis) / 60000UL;
+  if (elapsedMin >= baseMin) return 0;
+  return baseMin - elapsedMin;
+}
+
+// Outlined progress bar, filled left-to-right by pct (0-100).
+void drawUsageBar(int16_t x, int16_t y, int16_t w, int16_t h, int8_t pct) {
+  tft.drawRect(x, y, w, h, C_MUTED);
+  int16_t innerW = w - 4;
+  int16_t fillW = pct <= 0 ? 0 : (int32_t)innerW * pct / 100;
+  tft.fillRect(x + 2, y + 2, innerW, h - 4, C_DARKBG);
+  if (fillW > 0) tft.fillRect(x + 2, y + 2, fillW, h - 4, C_ORANGE);
+}
+
+// Just the "resets in Xh Ym" lines — redrawn on its own every tick so the
+// countdown advances without flickering the labels/bars above it.
+void drawUsageCountdowns() {
+  if (usageSessionPct < 0) return;
+  char buf[24];
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+
+  uint16_t sMin = usageMinutesRemaining(usageSessionResetMin);
+  tft.fillRect(12, 100, DISP_W - 24, 10, C_DARKBG);
+  tft.setCursor(12, 100);
+  snprintf(buf, sizeof(buf), "resets in %dh %dm", sMin / 60, sMin % 60);
+  tft.print(buf);
+
+  uint16_t wMin = usageMinutesRemaining(usageWeeklyResetMin);
+  tft.fillRect(12, 190, DISP_W - 24, 10, C_DARKBG);
+  tft.setCursor(12, 190);
+  snprintf(buf, sizeof(buf), "resets in %dh %dm", wMin / 60, wMin % 60);
+  tft.print(buf);
+}
+
+// Dedicated Usage-mode screen — big % + progress bar + reset countdown for
+// both the 5h session window and the 7d weekly window, pushed by the web
+// app's 'U' command. Shows a placeholder until the first value arrives.
+void drawUsageView() {
+  tft.fillScreen(C_DARKBG);
+  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
+  tft.setTextColor(C_WHITE); tft.setTextSize(2);
+  tft.setCursor(12, 14);
+  tft.print("Claude Usage");
+
+  if (usageSessionPct < 0) {
+    tft.setTextColor(C_MUTED); tft.setTextSize(1);
+    tft.setCursor(12, 70);
+    tft.print("waiting for data...");
+    return;
+  }
+
+  char buf[16];
+
+  // 5h session
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(12, 42);
+  tft.print("5h Session");
+  tft.setTextColor(C_WHITE); tft.setTextSize(3);
+  tft.setCursor(12, 54);
+  snprintf(buf, sizeof(buf), "%d%%", usageSessionPct);
+  tft.print(buf);
+  drawUsageBar(12, 82, DISP_W - 24, 14, usageSessionPct);
+
+  // 7d weekly
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(12, 132);
+  tft.print("7d Weekly");
+  tft.setTextColor(C_WHITE); tft.setTextSize(3);
+  tft.setCursor(12, 144);
+  snprintf(buf, sizeof(buf), "%d%%", usageWeeklyPct);
+  tft.print(buf);
+  drawUsageBar(12, 172, DISP_W - 24, 14, usageWeeklyPct);
+
+  drawUsageCountdowns();
+}
+
+// Keep the reset countdowns ticking forward while Usage mode is shown,
+// without flickering the bars/labels (same shape as updateClockViewIfShown).
+void updateUsageViewIfShown() {
+  if (currentMode != MODE_USAGE || usageSessionPct < 0) return;
+  static uint16_t lastSessionMin = 0xFFFF;
+  static uint16_t lastWeeklyMin  = 0xFFFF;
+  uint16_t sMin = usageMinutesRemaining(usageSessionResetMin);
+  uint16_t wMin = usageMinutesRemaining(usageWeeklyResetMin);
+  if (sMin != lastSessionMin || wMin != lastWeeklyMin) {
+    lastSessionMin = sMin;
+    lastWeeklyMin  = wMin;
+    drawUsageCountdowns();
+  }
+}
+
+// Keep Clock mode ticking forward while it's the active mode
 void updateClockViewIfShown() {
-  if (currentView != VIEW_CLOCK) return;
+  if (currentMode != MODE_CLOCK) return;
+
+  if (timerActive) {
+    static uint32_t lastTimerSec = 0xFFFF;
+    uint32_t remainSec = (timerAtMillis > millis() ? timerAtMillis - millis() : 0) / 1000;
+    if (remainSec != lastTimerSec) {
+      lastTimerSec = remainSec;
+      uint8_t mm = remainSec / 60;
+      uint8_t ss = remainSec % 60;
+      drawTimerTime(mm, ss);
+    }
+    return;
+  }
+
   static uint16_t lastMin = 0xFFFF;
   uint16_t m = clockNowMinutes();
   if (m != lastMin) { lastMin = m; drawClockView(); }
 }
 
 // ═════════════════════════════════════════════════════════════
-//  NUMERIC INPUT PROMPT ("t" set-clock, "r" set-alarm)
+//  NUMERIC INPUT PROMPT ("t" set-clock, "r" set-alarm — Clock mode only)
 // ═════════════════════════════════════════════════════════════
 
 void drawInputPrompt() {
@@ -407,7 +584,17 @@ void drawInputPrompt() {
   tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
   tft.setTextColor(C_WHITE); tft.setTextSize(2);
   tft.setCursor(12, 30);
-  tft.print(inputKind == INPUT_CLOCK_SET ? "Set time HHMM:" : "Alarm in (min):");
+  if (inputKind == INPUT_CLOCK_SET) {
+    tft.print("Set time HHMM:");
+  } else if (inputKind == INPUT_ALARM_SET) {
+    tft.print("Alarm at HHMM:");
+  } else if (inputKind == INPUT_TIMER_SEC) {
+    tft.print("Timer in (sec):");
+  } else if (inputKind == INPUT_POMO_WORK) {
+    tft.print("Focus time (min):");
+  } else if (inputKind == INPUT_POMO_BREAK) {
+    tft.print("Break time (min):");
+  }
   tft.fillRect(12, 70, DISP_W - 24, 30, C_DARKBG);
   tft.setTextColor(C_GREEN); tft.setTextSize(3);
   tft.setCursor(12, 70);
@@ -418,15 +605,13 @@ void drawInputPrompt() {
 void enterTimeInput(InputKind kind) {
   inputKind = kind;
   inputBuf  = "";
-  currentView = VIEW_INPUT;
   drawInputPrompt();
 }
 
 void cancelInput() {
   inputKind = INPUT_NONE;
   inputBuf  = "";
-  currentView = VIEW_EYES_NORMAL;
-  drawNormalEyes();
+  switchMode(currentMode);  // redraw whatever mode is underneath (Clock)
 }
 
 void armAlarm(uint16_t minutesFromNow) {
@@ -443,11 +628,39 @@ void submitInput() {
     clockBaseMinutes = hh * 60 + mm;
     clockBaseMillis  = millis();
     Serial.print("Clock set to "); Serial.println(inputBuf);
-  } else if (inputKind == INPUT_ALARM_MIN) {
-    uint16_t mins = inputBuf.toInt();
+  } else if (inputKind == INPUT_ALARM_SET) {
+    int val = inputBuf.toInt();
+    uint8_t hh = (val / 100) % 24;
+    uint8_t mm = (val % 100) > 59 ? 59 : (val % 100);
+    uint16_t alarmTargetMin = hh * 60 + mm;
+    uint16_t nowMin = clockNowMinutes();
+    int16_t diffMin = alarmTargetMin - nowMin;
+    if (diffMin <= 0) {
+      diffMin += 1440; // target is earlier today or now; set for tomorrow
+    }
+    armAlarm(diffMin);
+    Serial.print("Alarm set for ");
+    char timeBuf[6];
+    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", hh, mm);
+    Serial.print(timeBuf);
+    Serial.print(" (in "); Serial.print(diffMin); Serial.println(" min)");
+  } else if (inputKind == INPUT_TIMER_SEC) {
+    uint32_t secs = inputBuf.toInt();
+    if (secs > 0) {
+      armTimer(secs);
+      Serial.print("Timer set to "); Serial.print(secs); Serial.println(" seconds");
+    }
+  } else if (inputKind == INPUT_POMO_WORK) {
+    uint32_t mins = inputBuf.toInt();
     if (mins > 0) {
-      armAlarm(mins);
-      Serial.print("Alarm armed in "); Serial.print(mins); Serial.println(" min");
+      pomoWorkMs = mins * 60000UL;
+      Serial.print("Pomo work set to "); Serial.print(mins); Serial.println(" min");
+    }
+  } else if (inputKind == INPUT_POMO_BREAK) {
+    uint32_t mins = inputBuf.toInt();
+    if (mins > 0) {
+      pomoBreakMs = mins * 60000UL;
+      Serial.print("Pomo break set to "); Serial.print(mins); Serial.println(" min");
     }
   }
   cancelInput();
@@ -465,8 +678,17 @@ void handleInputChar(char c) {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  POMODORO TIMER
+//  POMODORO TIMER (ticks in the background regardless of currentMode;
+//  only draws while Pomodoro mode is the active mode)
 // ═════════════════════════════════════════════════════════════
+
+void drawPomodoroIdle() {
+  tft.fillScreen(C_DARKBG);
+  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
+  tft.setTextColor(C_WHITE); tft.setTextSize(3);
+  tft.setCursor(DISP_W / 2 - 72, DISP_H / 2 - 12);
+  tft.print("POMODORO");
+}
 
 void drawPomodoroStatic() {
   tft.fillScreen(C_DARKBG);
@@ -485,42 +707,65 @@ void drawPomodoroTime(uint8_t mm, uint8_t ss) {
   tft.print(buf);
 }
 
-void startPomodoro() {
-  pomodoroActive  = true;
-  pomodoroOnBreak = false;
-  pomodoroPhaseStart = millis();
-  currentView = VIEW_POMODORO;
-  drawPomodoroStatic();
-  drawPomodoroTime(25, 0);
-}
-
-void stopPomodoro() {
-  pomodoroActive = false;
-  currentView = VIEW_EYES_NORMAL;
-  drawNormalEyes();
+void pomodoroRemaining(uint8_t &mm, uint8_t &ss) {
+  uint32_t phaseLen = pomodoroOnBreak ? pomoBreakMs : pomoWorkMs;
+  uint32_t elapsed  = millis() - pomodoroPhaseStart;
+  uint32_t remainMs = elapsed >= phaseLen ? 0 : phaseLen - elapsed;
+  uint16_t remainSec = remainMs / 1000;
+  mm = remainSec / 60; ss = remainSec % 60;
 }
 
 void updatePomodoro() {
   if (!pomodoroActive) return;
+  if (pomodoroRinging) return;
+
   static uint16_t lastSec = 0xFFFF;
-  uint32_t phaseLen = pomodoroOnBreak ? POMO_BREAK_MS : POMO_WORK_MS;
-  uint32_t elapsed  = millis() - pomodoroPhaseStart;
-  if (elapsed >= phaseLen) {
+  uint32_t phaseLen = pomodoroOnBreak ? pomoBreakMs : pomoWorkMs;
+  if (millis() - pomodoroPhaseStart >= phaseLen) {
     pomodoroOnBreak    = !pomodoroOnBreak;
-    pomodoroPhaseStart = millis();
-    drawPomodoroStatic();
+    pomodoroRinging    = true;
+    pomoRingingFlashAt = 0;
     lastSec = 0xFFFF;
-    return;
+    Serial.println(pomodoroOnBreak ? "POMO_WORK_END" : "POMO_BREAK_END");
+  } else {
+    if (currentMode != MODE_POMODORO) return;
+    uint8_t mm, ss; pomodoroRemaining(mm, ss);
+    uint16_t sec = mm * 60 + ss;
+    if (sec != lastSec) { lastSec = sec; drawPomodoroTime(mm, ss); }
   }
-  uint16_t remainSec = (phaseLen - elapsed) / 1000;
-  if (remainSec != lastSec) {
-    lastSec = remainSec;
-    drawPomodoroTime(remainSec / 60, remainSec % 60);
+}
+
+void updatePomoFlash() {
+  if (!pomodoroActive || !pomodoroRinging) return;
+  if (millis() - pomoRingingFlashAt < 300) return;
+  pomoRingingFlashAt = millis();
+  pomoRingingFlashOn = !pomoRingingFlashOn;
+  
+  uint16_t bg = pomoRingingFlashOn ? C_ORANGE : C_WHITE;
+  uint16_t fg = pomoRingingFlashOn ? C_WHITE  : C_ORANGE;
+  tft.fillScreen(bg);
+  tft.setTextColor(fg); tft.setTextSize(3);
+  tft.setCursor(30, DISP_H / 2 - 12);
+  if (pomodoroOnBreak) {
+    tft.print("BREAK!");
+  } else {
+    tft.print("FOCUS!");
+  }
+}
+
+void checkPomodoroTimeout() {
+  if (pomoStoppedAt > 0 && currentMode == MODE_POMODORO && !pomodoroActive) {
+    if (millis() - pomoStoppedAt >= 10000UL) {
+      pomoStoppedAt = 0; // Disarm
+      switchMode(MODE_ANIMATION);
+    }
+  } else {
+    pomoStoppedAt = 0; // Disarm if mode changed or timer became active again
   }
 }
 
 // ═════════════════════════════════════════════════════════════
-//  ALARM
+//  ALARM (overlays on top of whatever mode is active)
 // ═════════════════════════════════════════════════════════════
 
 void checkAlarm() {
@@ -546,8 +791,76 @@ void updateAlarmFlash() {
 
 void dismissAlarm() {
   alarmRinging = false;
-  currentView  = VIEW_EYES_NORMAL;
-  drawNormalEyes();
+  switchMode(currentMode);  // redraw whatever was on screen before it rang
+}
+
+void disarmAlarm() {
+  alarmArmed   = false;
+  alarmRinging = false;
+}
+
+// ═════════════════════════════════════════════════════════════
+//  TIMER
+// ═════════════════════════════════════════════════════════════
+
+void armTimer(uint32_t seconds) {
+  timerActive     = true;
+  timerRinging    = false;
+  timerAtMillis   = millis() + seconds * 1000UL;
+  timerDurationMs = seconds * 1000UL;
+  if (currentMode == MODE_CLOCK) {
+    drawTimerStatic();
+    drawTimerTime(seconds / 60, seconds % 60);
+  }
+}
+
+void disarmTimer() {
+  timerActive  = false;
+  timerRinging = false;
+}
+
+void checkTimer() {
+  if (timerActive && millis() >= timerAtMillis) {
+    timerActive  = false;
+    timerRinging = true;
+    timerFlashAt = 0;
+  }
+}
+
+void updateTimerFlash() {
+  if (!timerRinging) return;
+  if (millis() - timerFlashAt < 300) return;
+  timerFlashAt = millis();
+  timerFlashOn = !timerFlashOn;
+  uint16_t bg = timerFlashOn ? C_ORANGE : C_WHITE;
+  uint16_t fg = timerFlashOn ? C_WHITE  : C_ORANGE;
+  tft.fillScreen(bg);
+  tft.setTextColor(fg); tft.setTextSize(3);
+  tft.setCursor(30, DISP_H / 2 - 12);
+  tft.print("TIMER!");
+}
+
+void dismissTimer() {
+  timerRinging = false;
+  switchMode(currentMode);
+}
+
+void drawTimerStatic() {
+  tft.fillScreen(C_DARKBG);
+  tft.fillRect(0, 0, DISP_W, 4, C_GREEN);
+  tft.setTextColor(C_MUTED); tft.setTextSize(2);
+  tft.setCursor(DISP_W / 2 - 30, DISP_H / 2 + 30);
+  tft.print("TIMER");
+}
+
+void drawTimerTime(uint8_t mm, uint8_t ss) {
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%02d:%02d", mm, ss);
+  // Erase only the time text bounding box to prevent screen jitter
+  tft.fillRect(0, DISP_H / 2 - 35, DISP_W, 55, C_DARKBG);
+  tft.setTextColor(C_WHITE); tft.setTextSize(6);
+  tft.setCursor(DISP_W / 2 - 72, DISP_H / 2 - 24);
+  tft.print(buf);
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -655,6 +968,118 @@ void termAddChar(char c) {
     termCol++;
     termDrawLastChar();
   }
+}
+
+void drawCowsayView(String msg) {
+  tft.fillScreen(C_DARKBG);
+  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
+  
+  const uint8_t maxBubbleWidth = 28;
+  
+  String words[30];
+  uint8_t wordCount = 0;
+  int startIdx = 0;
+  int spaceIdx = msg.indexOf(' ');
+  while (spaceIdx != -1 && wordCount < 30) {
+    String w = msg.substring(startIdx, spaceIdx);
+    w.trim();
+    if (w.length() > 0) {
+      words[wordCount++] = w;
+    }
+    startIdx = spaceIdx + 1;
+    spaceIdx = msg.indexOf(' ', startIdx);
+  }
+  if (startIdx < msg.length() && wordCount < 30) {
+    String w = msg.substring(startIdx);
+    w.trim();
+    if (w.length() > 0) {
+      words[wordCount++] = w;
+    }
+  }
+  
+  String lines[10];
+  uint8_t lineCount = 0;
+  String currentLine = "";
+  for (uint8_t i = 0; i < wordCount; i++) {
+    String testLine = currentLine + (currentLine.length() > 0 ? " " : "") + words[i];
+    if (testLine.length() <= maxBubbleWidth) {
+      currentLine = testLine;
+    } else {
+      if (currentLine.length() > 0) {
+        lines[lineCount++] = currentLine;
+      }
+      currentLine = words[i];
+      while (currentLine.length() > maxBubbleWidth && lineCount < 10) {
+        lines[lineCount++] = currentLine.substring(0, maxBubbleWidth);
+        currentLine = currentLine.substring(maxBubbleWidth);
+      }
+    }
+  }
+  if (currentLine.length() > 0 && lineCount < 10) {
+    lines[lineCount++] = currentLine;
+  }
+  if (lineCount == 0) {
+    lines[lineCount++] = "moo";
+  }
+  
+  uint8_t maxLen = 0;
+  for (uint8_t i = 0; i < lineCount; i++) {
+    if (lines[i].length() > maxLen) {
+      maxLen = lines[i].length();
+    }
+  }
+  
+  tft.setTextColor(C_WHITE); tft.setTextSize(1);
+  
+  int16_t y = 20;
+  
+  tft.setCursor(10, y);
+  tft.print("  ");
+  for (uint8_t i = 0; i < maxLen + 2; i++) tft.print("_");
+  y += 10;
+  
+  if (lineCount == 1) {
+    tft.setCursor(10, y);
+    tft.print("< " + lines[0] + " >");
+    y += 10;
+  } else {
+    for (uint8_t i = 0; i < lineCount; i++) {
+      tft.setCursor(10, y);
+      char left = '|', right = '|';
+      if (i == 0) { left = '/'; right = '\\'; }
+      else if (i == lineCount - 1) { left = '\\'; right = '/'; }
+      tft.print(left);
+      tft.print(" ");
+      tft.print(lines[i]);
+      for (uint8_t j = lines[i].length(); j < maxLen; j++) tft.print(" ");
+      tft.print(" ");
+      tft.print(right);
+      y += 10;
+    }
+  }
+  
+  tft.setCursor(10, y);
+  tft.print("  ");
+  for (uint8_t i = 0; i < maxLen + 2; i++) tft.print("-");
+  y += 10;
+  
+  const char* cowLines[] = {
+    "        \\   ^__^",
+    "         \\  (oo)\\_______",
+    "            (__)\\       )\\/\\",
+    "                ||----w |",
+    "                ||     ||"
+  };
+  
+  for (uint8_t i = 0; i < 5; i++) {
+    tft.setCursor(10, y);
+    tft.print(cowLines[i]);
+    y += 10;
+  }
+  
+  tft.setTextColor(C_MUTED);
+  tft.setCursor(10, 220);
+  tft.print("press any key to return");
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -791,6 +1216,101 @@ void animExcited() {
   busy = false;
 }
 
+void animLogoReveal() {
+  busy = true;
+  tft.fillScreen(animBgColor);
+  for (uint16_t i = 0; i < LOGO_SEG_COUNT; i++) {
+    int16_t x1 = pgm_read_word(&LOGO_SEGS[i][0]);
+    int16_t y1 = pgm_read_word(&LOGO_SEGS[i][1]);
+    int16_t x2 = pgm_read_word(&LOGO_SEGS[i][2]);
+    int16_t y2 = pgm_read_word(&LOGO_SEGS[i][3]);
+    tft.drawLine(x1, y1, x2, y2, C_WHITE);
+    tft.drawLine(x1 + 1, y1, x2 + 1, y2, C_WHITE);
+    if (i % 4 == 0) { delay(speedMs(8)); }
+  }
+  drawLogoFilled(animBgColor, C_WHITE);
+  delay(1500);
+  busy = false;
+}
+
+void drawHeartEye(int16_t x, int16_t y) {
+  tft.fillRect(x, y + 5, 10, 10, C_BLACK);       // Top-left lobe
+  tft.fillRect(x + 20, y + 5, 10, 10, C_BLACK);  // Top-right lobe
+  tft.fillRect(x, y + 15, 30, 15, C_BLACK);      // Middle body
+  tft.fillRect(x + 5, y + 30, 20, 10, C_BLACK);  // Lower body
+  tft.fillRect(x + 10, y + 40, 10, 10, C_BLACK); // Bottom tip
+}
+
+void drawHeartEyesView(bool blink = false) {
+  tft.fillScreen(animBgColor);
+  const int16_t lx = eyeLX(0), rx = eyeRX(0), ey = eyeY();
+  if (!blink) {
+    drawHeartEye(lx, ey + 10);
+    drawHeartEye(rx, ey + 10);
+  } else {
+    tft.fillRect(lx, ey + EYE_H / 2 - 3, EYE_W, 6, C_BLACK);
+    tft.fillRect(rx, ey + EYE_H / 2 - 3, EYE_W, 6, C_BLACK);
+  }
+}
+
+void animHeartEyes() {
+  busy = true;
+  for (uint8_t i = 0; i < 3; i++) {
+    drawHeartEyesView(false); delay(speedMs(400));
+    drawHeartEyesView(true);  delay(speedMs(100));
+  }
+  drawHeartEyesView(false);
+  busy = false;
+}
+
+void drawCrossEye(int16_t x, int16_t y) {
+  for (int16_t i = 0; i < 30; i += 6) {
+    tft.fillRect(x + i, y + i + 10, 6, 6, C_BLACK);
+    tft.fillRect(x + i, y + 30 - i + 10, 6, 6, C_BLACK);
+  }
+}
+
+void animDizzyEyes() {
+  busy = true;
+  const int16_t offs[] = {-4, 4, -4, 4, 0};
+  for (uint8_t i = 0; i < 5; i++) {
+    tft.fillScreen(animBgColor);
+    drawCrossEye(eyeLX(offs[i]), eyeY());
+    drawCrossEye(eyeRX(offs[i]), eyeY());
+    delay(speedMs(150));
+  }
+  drawNormalEyes();
+  busy = false;
+}
+
+void drawGlitchEyesView() {
+  tft.fillScreen(animBgColor);
+  const int16_t lx = eyeLX(0), rx = eyeRX(0), ey = eyeY();
+  tft.fillRect(lx, ey, EYE_W, EYE_H, C_BLACK);
+  tft.fillRect(rx, ey, EYE_W, EYE_H, C_BLACK);
+  
+  // Cut outs
+  for (int i = 0; i < 4; i++) {
+    tft.fillRect(lx + random(EYE_W - 8), ey + random(EYE_H - 8), 8, 8, animBgColor);
+    tft.fillRect(rx + random(EYE_W - 8), ey + random(EYE_H - 8), 8, 8, animBgColor);
+  }
+  // Floating dust
+  for (int i = 0; i < 3; i++) {
+    tft.fillRect(lx - 12 + random(8), ey + random(EYE_H), 8, 8, C_BLACK);
+    tft.fillRect(rx + EYE_W + 4 + random(8), ey + random(EYE_H), 8, 8, C_BLACK);
+  }
+}
+
+void animGlitchEyes() {
+  busy = true;
+  for (uint8_t i = 0; i < 8; i++) {
+    drawGlitchEyesView();
+    delay(speedMs(80));
+  }
+  drawNormalEyes();
+  busy = false;
+}
+
 // Idle animations cycled by dynamic mode — weighted toward the quick ones
 void (*const IDLE_ANIMS[])() = {
   animNormalEyes, animNormalEyes,
@@ -809,29 +1329,15 @@ void (*const IDLE_ANIMS[])() = {
   animTiltConfused,
   animExcited,
   animLogoReveal,
+  animHeartEyes,
+  animDizzyEyes,
+  animGlitchEyes,
 };
 const uint8_t IDLE_ANIM_COUNT = sizeof(IDLE_ANIMS) / sizeof(IDLE_ANIMS[0]);
 
 void playRandomIdleAnim() {
   IDLE_ANIMS[random(IDLE_ANIM_COUNT)]();
   nextIdleAnimAt = millis() + random(speedMs(1500), speedMs(4000));
-}
-
-void animLogoReveal() {
-  busy = true;
-  tft.fillScreen(animBgColor);
-  for (uint16_t i = 0; i < LOGO_SEG_COUNT; i++) {
-    int16_t x1 = pgm_read_word(&LOGO_SEGS[i][0]);
-    int16_t y1 = pgm_read_word(&LOGO_SEGS[i][1]);
-    int16_t x2 = pgm_read_word(&LOGO_SEGS[i][2]);
-    int16_t y2 = pgm_read_word(&LOGO_SEGS[i][3]);
-    tft.drawLine(x1, y1, x2, y2, C_WHITE);
-    tft.drawLine(x1 + 1, y1, x2 + 1, y2, C_WHITE);
-    if (i % 4 == 0) { delay(speedMs(8)); }
-  }
-  drawLogoFilled(animBgColor, C_WHITE);
-  delay(1500);
-  busy = false;
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -845,25 +1351,34 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 body{font-family:sans-serif;background:#0a0c10;color:#fff;text-align:center;padding:16px}
 button{font-size:18px;padding:12px 16px;margin:4px;border:none;border-radius:8px;background:#da1100;color:#fff}
 input{font-size:18px;padding:10px;border-radius:8px;border:none;width:60%}
+h4{margin:18px 0 4px;color:#999}
 </style></head><body>
 <h2>Clawd Mochi</h2>
+<h4>Mode</h4>
+<div>
+<button onclick="send('1')">Animation</button>
+<button onclick="send('2')">Clock</button>
+<button onclick="send('3')">Pomodoro</button>
+<button onclick="send('4')">Terminal</button>
+</div>
+<h4>Animation</h4>
 <div>
 <button onclick="send('w')">Eyes</button>
 <button onclick="send('s')">Squish</button>
-<button onclick="send('a')">Logo</button>
-<button onclick="send('d')">Term</button>
+<button onclick="send('z')">Logo</button>
 <button onclick="send('m')">Dynamic</button>
+</div>
+<h4>Pomodoro</h4>
+<div>
+<button onclick="send('p')">Start / Stop</button>
+</div>
+<h4>System</h4>
+<div>
 <button onclick="send('b')">Backlight</button>
+<button onclick="send('-')">Speed -</button>
+<button onclick="send('=')">Speed +</button>
 </div>
-<div>
-<button onclick="send('1')">Slow</button>
-<button onclick="send('2')">Normal</button>
-<button onclick="send('3')">Fast</button>
-</div>
-<div>
-<button onclick="send('c')">Clock</button>
-<button onclick="send('p')">Pomodoro</button>
-</div>
+<h4>Clock / Terminal</h4>
 <div>
 <input id="txt" placeholder="t1430 / r10 / type to terminal">
 <button onclick="sendText()">Send</button>
@@ -897,6 +1412,265 @@ void routeNotFound() {
 }
 
 // ═════════════════════════════════════════════════════════════
+//  MODE SWITCHING
+// ═════════════════════════════════════════════════════════════
+
+// Single source of truth for "draw whatever the current mode looks like" —
+// used both for actual mode switches and for redraws after an overlay
+// (alarm / numeric input) closes.
+void switchMode(Mode m) {
+  currentMode = m;
+  switch (m) {
+    case MODE_ANIMATION:
+      if (eyeView == EYE_SQUISH) drawSquishEyes(); else drawNormalEyes();
+      Serial.println("MODE:ANIMATION");
+      break;
+    case MODE_CLOCK:
+      if (timerActive) {
+        drawTimerStatic();
+        uint32_t remainSec = (timerAtMillis > millis() ? timerAtMillis - millis() : 0) / 1000;
+        drawTimerTime(remainSec / 60, remainSec % 60);
+      } else {
+        drawClockView();
+      }
+      Serial.println("MODE:CLOCK");
+      break;
+    case MODE_POMODORO:
+      if (pomodoroActive) {
+        drawPomodoroStatic();
+        uint8_t mm, ss; pomodoroRemaining(mm, ss);
+        drawPomodoroTime(mm, ss);
+      } else {
+        drawPomodoroIdle();
+      }
+      // Re-announce truth every time this mode is (re)entered, so a web
+      // client that just connected/reconnected resyncs before it acts.
+      Serial.println(pomodoroActive ? "POMO:ON" : "POMO:OFF");
+      Serial.println("MODE:POMODORO");
+      break;
+    case MODE_TERMINAL:
+      termClear();
+      termFullRedraw();
+      Serial.println("MODE:TERMINAL");
+      break;
+    case MODE_USAGE:
+      drawUsageView();
+      Serial.println("MODE:USAGE");
+      break;
+  }
+}
+
+void handleAnimationKey(char c) {
+  switch (c) {
+    case 'w': eyeView = EYE_NORMAL; animNormalEyes(); break;
+    case 's': eyeView = EYE_SQUISH; animSquishEyes(); break;
+    case 'z': eyeView = EYE_NORMAL; animLogoReveal(); break;
+    case 'm':
+      dynamicMode = !dynamicMode;
+      Serial.print("Dynamic mode: "); Serial.println(dynamicMode ? "on" : "off");
+      if (dynamicMode) nextIdleAnimAt = millis();
+      break;
+    case 'e': eyeView = EYE_NORMAL; animBlink(); break;
+    case 'f': eyeView = EYE_NORMAL; animDoubleBlink(); break;
+    case 'g': eyeView = EYE_NORMAL; animLookAround(); break;
+    case 'h': eyeView = EYE_NORMAL; animWink(); break;
+    case 'i': eyeView = EYE_NORMAL; animSleepy(); break;
+    case 'j': eyeView = EYE_NORMAL; animSurprised(); break;
+    case 'k': eyeView = EYE_NORMAL; animSquint(); break;
+    case 'l': eyeView = EYE_NORMAL; animNod(); break;
+    case 'n': eyeView = EYE_NORMAL; animShake(); break;
+    case 'o': eyeView = EYE_NORMAL; animRoll(); break;
+    case 'u': eyeView = EYE_NORMAL; animCrossEyed(); break;
+    case 'v': eyeView = EYE_NORMAL; animTiltConfused(); break;
+    case 'x': eyeView = EYE_NORMAL; animExcited(); break;
+    case 'p': eyeView = EYE_NORMAL; animHeartEyes(); break;
+    case 'q': eyeView = EYE_NORMAL; animDizzyEyes(); break;
+    case 'a': eyeView = EYE_NORMAL; animGlitchEyes(); break;
+    default: break;
+  }
+}
+
+void handleClockKey(char c) {
+  switch (c) {
+    case 't': enterTimeInput(INPUT_CLOCK_SET); break;
+    case 'r': enterTimeInput(INPUT_ALARM_SET); break;
+    case 'y': enterTimeInput(INPUT_TIMER_SEC); break;
+    case 'q': disarmTimer(); switchMode(currentMode); break;
+    case 'a': disarmAlarm(); switchMode(currentMode); break;
+    default: break;
+  }
+}
+
+void handlePomodoroKey(char c) {
+  if (c == 'p') {
+    pomodoroActive = !pomodoroActive;
+    if (pomodoroActive) {
+      pomodoroOnBreak    = false;
+      pomodoroRinging    = false;
+      pomodoroPhaseStart = millis();
+      drawPomodoroStatic();
+      drawPomodoroTime(pomoWorkMs / 60000UL, 0);
+    } else {
+      drawPomodoroIdle();
+      pomoStoppedAt = millis();
+    }
+    // Echo the real state — the web app trusts this instead of guessing,
+    // since pomodoroActive persists on the device across page reloads/
+    // reconnects and a stale local guess would invert the next press.
+    Serial.println(pomodoroActive ? "POMO:ON" : "POMO:OFF");
+  } else if (c == 'f') {
+    enterTimeInput(INPUT_POMO_WORK);
+  } else if (c == 'k') {
+    enterTimeInput(INPUT_POMO_BREAK);
+  }
+}
+
+// Single source of truth for command dispatch — shared by Serial input
+// and the WiFi web UI so both control surfaces behave identically.
+//
+// Priority: alarm overlay > numeric input overlay > terminal free-text >
+// global keys (mode switch, backlight, speed) > current mode's own keys.
+void handleChar(char c) {
+  if (cowsayActive) {
+    cowsayActive = false;
+    switchMode(currentMode);
+    return;
+  }
+
+  if (alarmRinging) { dismissAlarm(); return; }
+  if (timerRinging) { dismissTimer(); return; }
+  if (pomodoroActive && pomodoroRinging) {
+    pomodoroRinging = false;
+    pomodoroPhaseStart = millis();
+    switchMode(currentMode);
+    return;
+  }
+
+  if (inputKind != INPUT_NONE) { handleInputChar(c); return; }
+
+  if (collectingUsage) {
+    if (c == '\n' || c == '\r') {
+      if (usageBuf.length() == 12) { // SS WW RRR TTTTT
+        usageSessionPct      = usageBuf.substring(0, 2).toInt();
+        usageWeeklyPct       = usageBuf.substring(2, 4).toInt();
+        usageSessionResetMin = usageBuf.substring(4, 7).toInt();
+        usageWeeklyResetMin  = usageBuf.substring(7, 12).toInt();
+        usageReceivedMillis  = millis();
+        if (currentMode == MODE_USAGE) drawUsageView();
+      }
+      collectingUsage = false;
+      usageBuf = "";
+    } else if (c >= '0' && c <= '9' && usageBuf.length() < 12) {
+      usageBuf += c;
+    }
+    return;
+  }
+
+  if (collectingClockSet) {
+    if (c == '\n' || c == '\r') {
+      if (clockSetBuf.length() == 4) {
+        int val = clockSetBuf.toInt();
+        uint8_t hh = (val / 100) % 24;
+        uint8_t mm = (val % 100) > 59 ? 59 : (val % 100);
+        clockBaseMinutes = hh * 60 + mm;
+        clockBaseMillis  = millis();
+        if (currentMode == MODE_CLOCK) drawClockView(); // keep it accurate if already shown
+      }
+      collectingClockSet = false;
+      clockSetBuf = "";
+    } else if (c >= '0' && c <= '9' && clockSetBuf.length() < 4) {
+      clockSetBuf += c;
+    }
+    return;
+  }
+
+  if (collectingPomoStart) {
+    if (c == '\n' || c == '\r') {
+      if (pomoStartBuf.length() == 5) { // MM SS B
+        uint16_t fm = pomoStartBuf.substring(0, 2).toInt();
+        uint8_t  fs = pomoStartBuf.substring(2, 4).toInt();
+        uint8_t  bm = pomoStartBuf.substring(4, 5).toInt();
+        pomoWorkMs         = (uint32_t)(fm * 60 + fs) * 1000UL;
+        pomoBreakMs        = (uint32_t)bm * 60000UL;
+        pomodoroActive     = true;
+        pomodoroOnBreak    = false;
+        pomodoroRinging    = false;
+        pomodoroPhaseStart = millis();
+        if (currentMode == MODE_POMODORO) {
+          drawPomodoroStatic();
+          drawPomodoroTime(fm, fs);
+        }
+        Serial.println("POMO:ON");
+      }
+      collectingPomoStart = false;
+      pomoStartBuf = "";
+    } else if (c >= '0' && c <= '9' && pomoStartBuf.length() < 5) {
+      pomoStartBuf += c;
+    }
+    return;
+  }
+
+  if (currentMode == MODE_TERMINAL) {
+    if (c == '\n' || c == '\r') {
+      String cmdLine = termLines[termRow];
+      cmdLine.trim();
+      String lowerCmd = cmdLine;
+      lowerCmd.toLowerCase();
+      
+      if (lowerCmd.equalsIgnoreCase("exit")) {
+        switchMode(MODE_ANIMATION);
+      } else if (lowerCmd.equalsIgnoreCase("clear")) {
+        termClear();
+        termFullRedraw();
+      } else if (lowerCmd.startsWith("cowsay")) {
+        String msg = "moo";
+        if (cmdLine.length() > 6) {
+          msg = cmdLine.substring(6);
+          msg.trim();
+        }
+        if (msg.length() == 0) {
+          msg = "moo";
+        }
+        cowsayActive = true;
+        drawCowsayView(msg);
+      } else {
+        termAddChar(c);
+      }
+    } else {
+      termAddChar(c);
+    }
+    return;
+  }
+
+  switch (c) {
+    case '1': switchMode(MODE_ANIMATION); return;
+    case '2': switchMode(MODE_CLOCK);     return;
+    case '3': switchMode(MODE_POMODORO);  return;
+    case '4': switchMode(MODE_TERMINAL);  return;
+    case '5': switchMode(MODE_USAGE);     return;
+    case 'b': setBacklight(!backlightOn); return;
+    case 'U': collectingUsage = true; usageBuf = ""; return;
+    case 'T': collectingClockSet = true; clockSetBuf = ""; return;
+    case 'P': collectingPomoStart = true; pomoStartBuf = ""; return;
+    case '-':
+      animSpeed = animSpeed > 1 ? animSpeed - 1 : 1;
+      Serial.print("Speed: "); Serial.println(animSpeed);
+      return;
+    case '=':
+      animSpeed = animSpeed < 3 ? animSpeed + 1 : 3;
+      Serial.print("Speed: "); Serial.println(animSpeed);
+      return;
+  }
+
+  switch (currentMode) {
+    case MODE_ANIMATION: handleAnimationKey(c); break;
+    case MODE_CLOCK:     handleClockKey(c);     break;
+    case MODE_POMODORO:  handlePomodoroKey(c);  break;
+    default: break;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
 //  SETUP
 // ═════════════════════════════════════════════════════════════
 
@@ -905,7 +1679,7 @@ void setup() {
   randomSeed(esp_random());
 
   clockBaseMillis = millis();
-  nextClockShowAt = millis() + 30UL * 60000;
+  lastClockAlertMin = 0; // defaults to 00:00 at boot — don't auto-popup for it immediately
 
   pinMode(TFT_BLK, OUTPUT);
   setBacklight(true);
@@ -934,35 +1708,21 @@ void setup() {
   tft.setCursor(DISP_W / 2 - 54, DISP_H / 2 + 14); tft.print("Mochi");
   delay(1200);
 
-  // ── Logo shown once at startup ─────────────────────────────
+  // ── Logo shown once at startup, then straight into Animation mode
+  //    (dynamicMode defaults true, so it starts idle-cycling right away) ──
   animLogoReveal();
+  switchMode(MODE_ANIMATION);
 
-  // ── Serial control info screen ──────────────────────────────
-  tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
-  tft.setTextColor(C_WHITE);  tft.setTextSize(2);
-  tft.setCursor(12, 16);  tft.print("Serial control");
-  tft.setTextColor(C_MUTED);  tft.setTextSize(1);
-  tft.setCursor(12, 44);  tft.print("115200 baud");
-  tft.setTextColor(C_WHITE);  tft.setTextSize(1);
-  tft.setCursor(12, 72);  tft.print("w=eyes  s=squish  d=term");
-  tft.setCursor(12, 88);  tft.print("a=logo  1/2/3=speed  b=backlight");
-  tft.setCursor(12, 104); tft.print("m=dynamic  c=clock  t=set time");
-  tft.setCursor(12, 120); tft.print("p=pomodoro  r=set alarm");
-  tft.setTextColor(C_MUTED);  tft.setTextSize(1);
-  tft.setCursor(12, 140); tft.print("waiting for serial command...");
-  tft.setCursor(12, 160); tft.print(apOk ? "WiFi: " : "WiFi: failed");
-  if (apOk) { tft.print(AP_SSID); tft.setCursor(12, 176); tft.print(WiFi.softAPIP()); }
-
-  Serial.println("Clawd Mochi ready. Commands:");
-  Serial.println("  w=normal eyes  s=squish eyes  d=terminal  a=logo");
-  Serial.println("  1/2/3=speed  b=toggle backlight  m=dynamic mode");
-  Serial.println("  c=show clock  t=set time (HHMM)  p=pomodoro start/stop");
-  Serial.println("  r=set alarm (minutes from now)");
+  Serial.println("Clawd Mochi ready.");
+  Serial.println("Modes: 1=Animation 2=Clock 3=Pomodoro 4=Terminal");
+  Serial.println("Global: b=toggle backlight  -/+ =speed down/up");
+  Serial.println("Animation mode: w=normal s=squish z=logo m=dynamic");
   Serial.println("  e=blink f=double-blink g=look-around h=wink i=sleepy");
   Serial.println("  j=surprised k=squint l=nod n=shake o=roll u=cross-eyed");
   Serial.println("  v=tilt-confused x=excited");
-  Serial.println("  in terminal: type \"exit\" + Enter to leave");
+  Serial.println("Clock mode: t=set time (HHMM)  r=set alarm (min from now)");
+  Serial.println("Pomodoro mode: p=start/stop  P=MMSSB set+start (keeps ticking in background)");
+  Serial.println("Terminal mode: type freely; \"exit\"+Enter to leave");
   Serial.println("WiFi web UI (if AP started): connect to the AP above, browse to its IP");
 }
 
@@ -970,86 +1730,37 @@ void setup() {
 //  LOOP
 // ═════════════════════════════════════════════════════════════
 
-void enterTerminal() {
-  currentView = VIEW_CODE; drawCodeView();
-  termMode = true; termClear(); termFullRedraw();
-}
-
-void exitTerminal() {
-  termMode = false;
-  currentView = VIEW_EYES_NORMAL; drawNormalEyes();
-}
-
-// True while some non-idle mode owns the screen — idle/dynamic animations
-// and the 30-min clock popup must stay out of the way during these.
-bool inSpecialMode() {
-  return termMode || pomodoroActive || alarmRinging ||
-         inputKind != INPUT_NONE || currentView == VIEW_CLOCK;
-}
-
+// Fires once at each wall-clock quarter-hour (xx:00, xx:15, xx:30, xx:45) —
+// not just "every 15 minutes from boot" — so it lines up with the clock
+// face itself, e.g. 4:15, 4:30, 4:45.
 void maybeAutoShowClock() {
-  if (millis() < nextClockShowAt) return;
-  nextClockShowAt = millis() + 30UL * 60000;
-  if (inSpecialMode()) return;
-  uint8_t prevView = currentView;
+  uint16_t nowMin = clockNowMinutes();
+  if (nowMin % 15 != 0 || nowMin == lastClockAlertMin) return;
+  lastClockAlertMin = nowMin;
+  if (currentMode != MODE_ANIMATION) return;  // don't interrupt other modes
   drawClockView();
   delay(4000);
-  if (prevView == VIEW_EYES_SQUISH) { currentView = VIEW_EYES_SQUISH; drawSquishEyes(); }
-  else                              { currentView = VIEW_EYES_NORMAL; drawNormalEyes(); }
+  if (eyeView == EYE_SQUISH) drawSquishEyes(); else drawNormalEyes();
 }
 
-// Single source of truth for command dispatch — shared by Serial input
-// and the WiFi web UI so both control surfaces behave identically.
-void handleChar(char c) {
-  if (alarmRinging) { dismissAlarm(); return; }
+// Auto-popup the Usage screen (Animation mode only) the first time usage
+// crosses each new 10% mark, plus a special one at 95% as a final warning
+// before the limit. Uses whichever of session/weekly is higher, since
+// either window can be the binding constraint.
+int8_t lastUsageAlertBucket = -1;
 
-  if (inputKind != INPUT_NONE) { handleInputChar(c); return; }
+void maybeAutoShowUsage() {
+  if (usageSessionPct < 0) return;            // no data pushed yet
+  if (currentMode != MODE_ANIMATION) return;  // don't interrupt other modes
 
-  if (termMode) {
-    if ((c == '\n' || c == '\r') && termLines[termRow].equalsIgnoreCase("exit")) {
-      exitTerminal();
-    } else {
-      termAddChar(c);
-    }
-    return;
-  }
+  int8_t pct = usageSessionPct > usageWeeklyPct ? usageSessionPct : usageWeeklyPct;
+  int8_t bucket = (pct >= 95) ? 95 : (pct / 10) * 10;
+  if (bucket < 10 || bucket == lastUsageAlertBucket) return;
 
-  if (pomodoroActive) {
-    if (c == 'p') stopPomodoro();
-    return;
-  }
-
-  switch (c) {
-    case 'w': currentView = VIEW_EYES_NORMAL; animNormalEyes(); break;
-    case 's': currentView = VIEW_EYES_SQUISH; animSquishEyes(); break;
-    case 'd': enterTerminal(); break;
-    case 'a': currentView = VIEW_EYES_NORMAL; animLogoReveal(); break;
-    case '1': case '2': case '3': animSpeed = c - '0'; break;
-    case 'b': setBacklight(!backlightOn); break;
-    case 'm':
-      dynamicMode = !dynamicMode;
-      Serial.print("Dynamic mode: "); Serial.println(dynamicMode ? "on" : "off");
-      if (dynamicMode) nextIdleAnimAt = millis();
-      break;
-    case 'c': currentView = VIEW_CLOCK; drawClockView(); break;
-    case 't': enterTimeInput(INPUT_CLOCK_SET); break;
-    case 'p': startPomodoro(); break;
-    case 'r': enterTimeInput(INPUT_ALARM_MIN); break;
-    case 'e': currentView = VIEW_EYES_NORMAL; animBlink(); break;
-    case 'f': currentView = VIEW_EYES_NORMAL; animDoubleBlink(); break;
-    case 'g': currentView = VIEW_EYES_NORMAL; animLookAround(); break;
-    case 'h': currentView = VIEW_EYES_NORMAL; animWink(); break;
-    case 'i': currentView = VIEW_EYES_NORMAL; animSleepy(); break;
-    case 'j': currentView = VIEW_EYES_NORMAL; animSurprised(); break;
-    case 'k': currentView = VIEW_EYES_NORMAL; animSquint(); break;
-    case 'l': currentView = VIEW_EYES_NORMAL; animNod(); break;
-    case 'n': currentView = VIEW_EYES_NORMAL; animShake(); break;
-    case 'o': currentView = VIEW_EYES_NORMAL; animRoll(); break;
-    case 'u': currentView = VIEW_EYES_NORMAL; animCrossEyed(); break;
-    case 'v': currentView = VIEW_EYES_NORMAL; animTiltConfused(); break;
-    case 'x': currentView = VIEW_EYES_NORMAL; animExcited(); break;
-    default: break;
-  }
+  lastUsageAlertBucket = bucket;
+  drawUsageView();
+  delay(4000);
+  if (eyeView == EYE_SQUISH) drawSquishEyes(); else drawNormalEyes();
 }
 
 void loop() {
@@ -1059,12 +1770,18 @@ void loop() {
 
   checkAlarm();
   updateAlarmFlash();
+  checkTimer();
+  updateTimerFlash();
   updatePomodoro();
+  updatePomoFlash();
+  checkPomodoroTimeout();
   maybeAutoShowClock();
+  maybeAutoShowUsage();
   updateClockViewIfShown();
+  updateUsageViewIfShown();
 
-  if (dynamicMode && !inSpecialMode() && !busy && millis() >= nextIdleAnimAt) {
-    currentView = VIEW_EYES_NORMAL;
+  if (dynamicMode && currentMode == MODE_ANIMATION && !busy && millis() >= nextIdleAnimAt) {
+    eyeView = EYE_NORMAL;
     playRandomIdleAnim();
   }
 }
