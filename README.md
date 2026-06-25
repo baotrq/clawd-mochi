@@ -1,8 +1,7 @@
 <!-- LOGO -->
 <p align="center">
-  <img src="pics/clawd_print_face.jpg" alt="Clawd Mochi — 3D-printed desk companion" width="420"/>
-  &nbsp;
-  <img src="pics/clawd_print_logo.jpg" alt="Clawd Mochi showing the Anthropic logo" width="420"/>
+  <img src="pics/clawd_print_face.jpg" alt="Clawd Mochi — 3D-printed desk companion" width="360"/>
+  <img src="pics/clawd_print_logo.jpg" alt="Clawd Mochi showing the Anthropic logo" width="360"/>
 </p>
 
 # Clawd Mochi — Extended Edition 🦀🤖
