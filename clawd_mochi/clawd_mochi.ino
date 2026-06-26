@@ -2447,10 +2447,12 @@ void handleChar(char c) {
     return;
   }
 
-  // Dismiss alarm/timer on any user key — but silently drop 'U'/'W' start
-  // chars (the web's auto usage/weather push) so they don't kill the ring.
+  // Dismiss alarm/timer on any real user key. Ignore protocol/whitespace
+  // bytes so they don't kill the ring: 'U'/'W' are auto-pushes, 'R' is the
+  // ring trigger itself, and '\n'/'\r' are command terminators (the 'R\n'
+  // that starts the ring must not immediately dismiss it).
   if (alarmRinging || timerRinging) {
-    if (c == 'U' || c == 'W') return;
+    if (c == 'U' || c == 'W' || c == 'R' || c == '\n' || c == '\r') return;
     if (alarmRinging) { dismissAlarm(); return; }
     if (timerRinging) { dismissTimer(); return; }
   }
