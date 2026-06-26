@@ -521,7 +521,7 @@ export default function App() {
     return 2
   }
 
-  const handleFetchAndPushWeather = async (loc = selectedLocation) => {
+  const handleFetchAndPushWeather = async (loc = selectedLocation, switchToWeather = true) => {
     const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY
     try {
       const latVal = typeof loc.lat === 'number' && !isNaN(loc.lat) ? loc.lat : 0
@@ -550,12 +550,16 @@ export default function App() {
       const cleanCondText = removeVietnameseTones(condText)
       const msg = `W${wmoCode},${Math.round(d.main.temp)},${Math.round(d.main.feels_like)},${d.main.humidity},${cleanLocName},${cleanCondText}\n`
       await handleWriteSerial(msg)
-      await handleWriteSerial('6')
-      setActiveMode('weather')
+      if (switchToWeather) {
+        await handleWriteSerial('6')
+        setActiveMode('weather')
+      }
     } catch (err) {
       console.error('Failed to fetch/push weather:', err)
-      await handleWriteSerial('6')
-      setActiveMode('weather')
+      if (switchToWeather) {
+        await handleWriteSerial('6')
+        setActiveMode('weather')
+      }
     }
   }
 
@@ -611,8 +615,8 @@ export default function App() {
       return updated
     })
 
-    // Fetch and sync immediately
-    handleFetchAndPushWeather(loc)
+    // Push updated data to device without switching to weather mode
+    handleFetchAndPushWeather(loc, false)
   }
 
   const handleDeleteRecentLocation = (locToDelete) => {
