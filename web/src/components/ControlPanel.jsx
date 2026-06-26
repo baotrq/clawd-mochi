@@ -99,14 +99,33 @@ export default function ControlPanel({
   activeMode,
   onClose,
   onWriteSerial,
+  onRefreshWeather,
   isConnected,
   activeAlarm,
   activeTimer,
   isPomoActive,
   usage,
+  weatherData,
   alarms = [],
   setAlarms,
+  selectedLocation,
+  recentLocations = [],
+  onLocationChange,
+  onSearchLocations,
+  onDeleteRecentLocation,
 }) {
+  const returnToIdleRef = useRef(null)
+  useEffect(() => () => { if (returnToIdleRef.current) clearTimeout(returnToIdleRef.current) }, [])
+
+  const handleExpressionClick = (cmd) => {
+    if (returnToIdleRef.current) clearTimeout(returnToIdleRef.current)
+    onWriteSerial(cmd)
+    returnToIdleRef.current = setTimeout(() => {
+      onWriteSerial('w')
+      returnToIdleRef.current = null
+    }, 5000)
+  }
+
   const [alarmHourStr, setAlarmHourStr] = useState('')
   const [alarmMinuteStr, setAlarmMinuteStr] = useState('')
   const [clockHourStr, setClockHourStr] = useState('')
@@ -120,7 +139,29 @@ export default function ControlPanel({
   const [pomoBreakStr, setPomoBreakStr] = useState('5')
   const [alarmTimeLeft, setAlarmTimeLeft] = useState('')
   const [timerTimeLeft, setTimerTimeLeft] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [isSearching, setIsSearching] = useState(false)
   const termInputRef = useRef(null)
+
+  useEffect(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) {
+      setSearchResults([])
+      return
+    }
+    const delayDebounce = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const results = await onSearchLocations(searchQuery)
+        setSearchResults(results || [])
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setIsSearching(false)
+      }
+    }, 400)
+    return () => clearTimeout(delayDebounce)
+  }, [searchQuery, onSearchLocations])
   const termEndRef = useRef(null)
   const panelRef = useRef(null)
   const [terminalHistory, setTerminalHistory] = useState([])
@@ -351,6 +392,7 @@ export default function ControlPanel({
           {activeMode === 'clock' && 'Clock Settings'}
           {activeMode === 'pomodoro' && 'Pomodoro Timer'}
           {activeMode === 'usage' && 'Claude Usage'}
+          {activeMode === 'weather' && 'Weather Station'}
         </span>
         <button
           onClick={onClose}
@@ -370,59 +412,18 @@ export default function ControlPanel({
       {/* Mode content */}
       {activeMode === 'animation' && (
         <div className="space-y-4">
-          {/* Claude Vibe — a one-shot trigger, not a toggle switch; pressing
-              it again just pulses the idle-cycle command again, so there's
-              no persistent "on" look to maintain here. */}
-          <button
-            onClick={() => onWriteSerial('m')}
-            className={`w-full py-4 px-4 rounded-xl cursor-pointer transition-all duration-300 active:scale-[0.98] flex items-center justify-center group relative overflow-hidden border bg-transparent ${
-              activeTimer || activeAlarm
-                ? 'opacity-60 cursor-not-allowed border-ascii-mid/10'
-                : 'border-[#d97756]/50 text-[#e8a98a] hover:border-[#d97756]/80 hover:text-[#f0b89a] hover:shadow-[0_0_18px_rgba(217,119,86,0.2)]'
-            }`}
-            disabled={!!activeTimer || !!activeAlarm}
-            title={activeTimer || activeAlarm ? "Cannot vibe while timer/alarm is active" : "Trigger an idle-cycle pulse"}
-          >
-            <span className="text-lg font-serif-display italic font-medium tracking-wide">
+          <div className="w-full py-4 px-4 flex items-center justify-center">
+            <span className="text-lg font-serif-display italic font-medium tracking-wide text-[#e8a98a]">
               Let Claude Vibe
             </span>
-          </button>
-
-          {/* Secondary configuration (Backlight & speed control) */}
-          <div className="flex gap-2 justify-between items-center text-[10px] bg-ascii-dim/10 border border-ascii-mid/10 rounded-lg px-2.5 py-1.5">
-            <span className="text-ascii-mid font-semibold select-none font-sans">Screen Config</span>
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => onWriteSerial('b')}
-                className="bg-ascii-dim/20 hover:bg-ascii-bright/10 border border-ascii-mid/20 hover:border-ascii-bright/40 text-ascii-bright px-2 py-0.5 rounded cursor-pointer transition-all text-[9px] font-sans font-medium"
-                title="Toggle display backlight"
-              >
-                💡 Light
-              </button>
-              <button
-                onClick={() => onWriteSerial('-')}
-                className="bg-ascii-dim/20 hover:bg-ascii-bright/10 border border-ascii-mid/20 hover:border-ascii-bright/40 text-ascii-bright px-2 py-0.5 rounded cursor-pointer transition-all text-[9px] font-sans font-medium"
-                title="Slow down animations"
-              >
-                🐢 Slower
-              </button>
-              <button
-                onClick={() => onWriteSerial('=')}
-                className="bg-ascii-dim/20 hover:bg-ascii-bright/10 border border-ascii-mid/20 hover:border-ascii-bright/40 text-ascii-bright px-2 py-0.5 rounded cursor-pointer transition-all text-[9px] font-sans font-medium"
-                title="Speed up animations"
-              >
-                🐇 Faster
-              </button>
-            </div>
           </div>
 
-          {/* Animations grid */}
-          <div className="h-64 overflow-y-auto scrollbar-none pr-0.5">
+          <div className="h-72 overflow-y-auto scrollbar-none pr-0.5">
             <div className="grid grid-cols-2 gap-2">
               {EXPRESSIONS.map((exp) => (
                 <button
                   key={exp.cmd}
-                  onClick={() => onWriteSerial(exp.cmd)}
+                  onClick={() => handleExpressionClick(exp.cmd)}
                   title={exp.desc}
                   className="bg-ascii-dim/5 hover:bg-ascii-bright/10 border border-ascii-mid/15 hover:border-ascii-bright/40 text-center py-2.5 px-2 rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center group"
                 >
@@ -861,6 +862,139 @@ export default function ControlPanel({
           >
             {isPomoActive ? 'Stop Pomodoro' : 'Start Pomodoro'}
           </button>
+        </div>
+      )}
+
+      {activeMode === 'weather' && (
+        <div className="space-y-4">
+          <div className="bg-room-bg-deep border border-ascii-mid/30 rounded-xl p-4 text-center">
+            <div className="text-[10px] text-ascii-mid uppercase font-bold tracking-wider mb-1">Live Weather</div>
+            
+            {/* Active Location Info */}
+            <div className="text-sm font-bold font-mono text-ascii-spark mb-1">
+              {weatherData?.cityName || selectedLocation.name}
+            </div>
+            {selectedLocation.country && (
+              <div className="text-[9px] text-ascii-dim font-mono mb-3">
+                {selectedLocation.admin1 ? `${selectedLocation.admin1}, ` : ''}{selectedLocation.country}
+              </div>
+            )}
+            
+            {weatherData ? (
+              <div className="mt-3 space-y-2 border-t border-ascii-mid/10 pt-3 text-left font-mono text-[11px] text-ascii-bright">
+                <div className="flex justify-between">
+                  <span>Temperature:</span>
+                  <span className="text-ascii-spark font-bold">{weatherData.temp}°C</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Feels Like:</span>
+                  <span className="text-ascii-spark">{weatherData.feels}°C</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Humidity:</span>
+                  <span className="text-ascii-spark">{weatherData.humidity}%</span>
+                </div>
+                <div className="flex justify-between text-[#e8a98a]">
+                  <span>Condition:</span>
+                  <span className="font-bold">{weatherData.condition}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[10px] text-ascii-dim mt-2 italic">
+                No local weather sync data yet.
+              </div>
+            )}
+            
+            <button
+              onClick={onRefreshWeather}
+              className="mt-3 w-full bg-ascii-bright/10 hover:bg-ascii-bright/25 border border-ascii-mid/30 text-ascii-spark font-semibold py-1.5 rounded transition-all cursor-pointer text-center text-[10px]"
+            >
+              Refresh & Sync
+            </button>
+          </div>
+
+          {/* Search Box & Suggestions */}
+          <div className="bg-room-bg-deep border border-ascii-mid/30 rounded-xl p-4">
+            <div className="text-[10px] text-ascii-mid uppercase font-bold tracking-wider mb-2">Change Location</div>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search city (e.g. London, Paris...)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-room-bg/50 border border-ascii-mid/30 rounded px-2 py-1.5 text-ascii-bright font-mono text-xs focus:outline-none focus:border-ascii-spark placeholder-ascii-dim"
+              />
+              {isSearching && (
+                <span className="absolute right-2.5 top-2.5 flex h-3.5 w-3.5 items-center justify-center">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-ascii-spark opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-ascii-spark"></span>
+                </span>
+              )}
+            </div>
+
+            {/* Search Results Dropdown List */}
+            {searchResults.length > 0 && (
+              <div className="mt-2 border border-ascii-mid/20 rounded bg-room-bg-deep overflow-hidden divide-y divide-ascii-mid/10 max-h-[150px] overflow-y-auto z-30 font-mono text-[11px]">
+                {searchResults.map((result, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      onLocationChange(result);
+                      setSearchQuery('');
+                      setSearchResults([]);
+                    }}
+                    className="w-full text-left px-3 py-2 text-ascii-bright hover:bg-ascii-bright/10 hover:text-ascii-spark transition-colors block"
+                  >
+                    <div className="font-semibold">{result.name}</div>
+                    <div className="text-[9px] text-ascii-dim">
+                      {result.admin1 ? `${result.admin1}, ` : ''}{result.country}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Recent Locations */}
+            {recentLocations.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-ascii-mid/10">
+                <div className="text-[9px] text-ascii-dim uppercase font-bold tracking-wider mb-2">Recent Locations</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {recentLocations.map((loc, idx) => (
+                    <div
+                      key={idx}
+                      className="group relative"
+                    >
+                      <button
+                        onClick={() => onLocationChange(loc)}
+                        className={`text-[9px] font-mono px-2 py-1 rounded border transition-all cursor-pointer ${
+                          selectedLocation.lat === loc.lat && selectedLocation.lon === loc.lon
+                            ? 'border-ascii-spark/60 text-ascii-spark bg-ascii-spark/10 font-bold'
+                            : 'border-ascii-mid/20 text-ascii-bright hover:border-ascii-bright/35 hover:bg-ascii-bright/5'
+                        }`}
+                      >
+                        {loc.name}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onDeleteRecentLocation(loc);
+                        }}
+                        className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-room-bg border border-ascii-mid/30 hover:bg-ascii-bright/10 hover:border-ascii-spark/60 text-ascii-dim hover:text-ascii-spark text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-md select-none leading-none"
+                        title="Remove location"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="text-[10px] text-ascii-mid leading-relaxed text-center italic">
+            This mode displays live temperature, feels-like temperature, humidity, and retro weather animations (clear, cloudy, fog, rain, storm) on the device.
+          </div>
         </div>
       )}
     </div>

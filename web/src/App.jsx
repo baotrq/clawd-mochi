@@ -11,6 +11,41 @@ import {
   writeSerial,
 } from './lib/serial.js'
 
+function removeVietnameseTones(str) {
+  if (!str) return '';
+  let result = String(str);
+  
+  // Map specific Vietnamese accented characters to plain English letters
+  result = result.replace(/[àáạảãâầấậẩẫăằắặẳẵ]/g, "a");
+  result = result.replace(/[èéẹẻẽêềếệểễ]/g, "e");
+  result = result.replace(/[ìíịỉĩ]/g, "i");
+  result = result.replace(/[òóọỏõôồốộổỗơờớợởỡ]/g, "o");
+  result = result.replace(/[ùúụủũưừứựửữ]/g, "u");
+  result = result.replace(/[ỳýỵỷỹ]/g, "y");
+  result = result.replace(/[đ]/g, "d");
+  
+  result = result.replace(/[ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ]/g, "A");
+  result = result.replace(/[ÈÉẸẺẼÊỀẾỆỂỄ]/g, "E");
+  result = result.replace(/[ÌÍỊỈĨ]/g, "I");
+  result = result.replace(/[ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ]/g, "O");
+  result = result.replace(/[ÙÚỤỦŨƯỪỨỰỬỮ]/g, "U");
+  result = result.replace(/[ỲÝỴỶỸ]/g, "Y");
+  result = result.replace(/[Đ]/g, "D");
+  
+  // Decompose any leftover accents (combining diacritics) and remove them
+  result = result.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  
+  // Keep only printable ASCII characters 32-126
+  let cleanStr = "";
+  for (let i = 0; i < result.length; i++) {
+    const code = result.charCodeAt(i);
+    if (code >= 32 && code <= 126) {
+      cleanStr += result[i];
+    }
+  }
+  return cleanStr;
+}
+
 const STORAGE_KEY = 'mochi-hotspots-calib'
 
 const DEFAULT_HOTSPOTS = {
@@ -54,6 +89,14 @@ const DEFAULT_HOTSPOTS = {
     cmd: '5',
     label: 'Sleeping Cat (Claude Usage)',
   },
+  window: {
+    x: 0.51,
+    y: 0.22,
+    r: 0.09,
+    mode: 'weather',
+    cmd: '6',
+    label: 'Window (Weather Mode)',
+  },
 }
 
 export default function App() {
@@ -62,6 +105,7 @@ export default function App() {
   const [activeAlarm, setActiveAlarm] = useState(null) // { durationMins, endTime }
   const [activeTimer, setActiveTimer] = useState(null) // { durationSecs, endTime }
   const [isPomoActive, setIsPomoActive] = useState(false)
+  const [idleIntervalSec, setIdleIntervalSec] = useState(8)
   const [showConfigMenu, setShowConfigMenu] = useState(false)
   const [calibrateMode, setCalibrateMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -123,6 +167,29 @@ export default function App() {
 
   // Claude Pro usage polling (5h session % / 7d weekly %)
   const [usage, setUsage] = useState(null) // { sessionPct, weeklyPct, sessionResetAt, weeklyResetAt } | null
+  const [weatherData, setWeatherData] = useState(null) // { temp, feels, humidity, condition }
+
+  const [selectedLocation, setSelectedLocation] = useState(() => {
+    const saved = localStorage.getItem('mochi-weather-location')
+    if (saved) {
+      try {
+        return JSON.parse(saved)
+      } catch (e) {}
+    }
+    return { name: 'Ho Chi Minh City', shortName: 'Ho Chi Minh City', lat: 10.823, lon: 106.630, timezone: 'Asia/Ho_Chi_Minh', country: 'Vietnam' }
+  })
+
+  const [recentLocations, setRecentLocations] = useState(() => {
+    const saved = localStorage.getItem('mochi-recent-locations')
+    if (saved) {
+      try {
+        return JSON.parse(saved)
+      } catch (e) {}
+    }
+    return [
+      { name: 'Ho Chi Minh City', shortName: 'Ho Chi Minh City', lat: 10.823, lon: 106.630, timezone: 'Asia/Ho_Chi_Minh', country: 'Vietnam' }
+    ]
+  })
 
   // Try the relative /api/usage first (works via the Vite dev-server
   // middleware when running `npm run dev` locally). That route doesn't
@@ -290,6 +357,7 @@ export default function App() {
       else if (trimmed === 'MODE:POMODORO') setActiveMode('pomodoro')
       else if (trimmed === 'MODE:TERMINAL') setActiveMode('terminal')
       else if (trimmed === 'MODE:USAGE') setActiveMode('usage')
+      else if (trimmed === 'WEATHER') setActiveMode('weather')
     }
   }
 
@@ -463,8 +531,125 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
   }
 
+  // Maps OpenWeather condition ID to a WMO-compatible code for the firmware's wmoToCondition()
+  const owIdToWmo = (id) => {
+    if (id === 800) return 0           // clear sky
+    if (id >= 801 && id <= 804) return 2   // clouds → WC_CLOUDY
+    if (id >= 700 && id < 800) return 45   // atmosphere (mist, fog, haze) → WC_FOG
+    if (id >= 300 && id < 600) return 61   // drizzle, rain, snow → WC_RAIN
+    if (id >= 200 && id < 300) return 95   // thunderstorm → WC_STORM
+    return 2
+  }
+
+  const handleFetchAndPushWeather = async (loc = selectedLocation) => {
+    const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY
+    try {
+      const latVal = typeof loc.lat === 'number' && !isNaN(loc.lat) ? loc.lat : 0
+      const lonVal = typeof loc.lon === 'number' && !isNaN(loc.lon) ? loc.lon : 0
+      const r = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${latVal}&lon=${lonVal}&units=metric&appid=${apiKey}`)
+      const d = await r.json()
+      if (!d.main) {
+        throw new Error('No weather data returned')
+      }
+
+      const owId = d.weather?.[0]?.id ?? 800
+      const condText = d.weather?.[0]?.description
+        ? d.weather[0].description.replace(/\b\w/g, c => c.toUpperCase())
+        : 'Cloudy'
+      const wmoCode = owIdToWmo(owId)
+
+      setWeatherData({
+        temp: Math.round(d.main.temp),
+        feels: Math.round(d.main.feels_like),
+        humidity: d.main.humidity,
+        condition: condText,
+        cityName: loc.name
+      })
+
+      const cleanLocName = removeVietnameseTones(loc.shortName || loc.name)
+      const cleanCondText = removeVietnameseTones(condText)
+      const msg = `W${wmoCode},${Math.round(d.main.temp)},${Math.round(d.main.feels_like)},${d.main.humidity},${cleanLocName},${cleanCondText}\n`
+      await handleWriteSerial(msg)
+      await handleWriteSerial('6')
+      setActiveMode('weather')
+    } catch (err) {
+      console.error('Failed to fetch/push weather:', err)
+      await handleWriteSerial('6')
+      setActiveMode('weather')
+    }
+  }
+
+  const handleSearchLocations = async (query) => {
+    if (!query || query.trim().length < 2) return []
+    const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY
+    try {
+      const r = await fetch(`https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(query)}&limit=5&appid=${apiKey}`)
+      const d = await r.json()
+      if (Array.isArray(d) && d.length > 0) {
+        return d.map(item => {
+          const cleanName = removeVietnameseTones(item.name || '')
+          const cleanCountry = removeVietnameseTones(item.country || '')
+          const cleanAdmin1 = removeVietnameseTones(item.state || '')
+
+          return {
+            name: cleanName,
+            shortName: cleanName.substring(0, 20),
+            lat: item.lat,
+            lon: item.lon,
+            timezone: 'auto',
+            country: cleanCountry,
+            admin1: cleanAdmin1
+          }
+        })
+      }
+    } catch (err) {
+      console.error('Geocoding search failed:', err)
+    }
+    return []
+  }
+
+  // Auto-refresh weather every 2 minutes while in weather mode.
+  // Also fetches immediately on entering weather mode so data is always fresh.
+  useEffect(() => {
+    if (activeMode !== 'weather') return
+    handleFetchAndPushWeather()
+    const id = setInterval(() => handleFetchAndPushWeather(), 2 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [activeMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleLocationChange = (loc) => {
+    setSelectedLocation(loc)
+    localStorage.setItem('mochi-weather-location', JSON.stringify(loc))
+    
+    // Add to recent locations list (avoid duplicates, max 5 items)
+    setRecentLocations(prev => {
+      const filtered = prev.filter(item => 
+        !(item.lat === loc.lat && item.lon === loc.lon)
+      )
+      const updated = [loc, ...filtered].slice(0, 5)
+      localStorage.setItem('mochi-recent-locations', JSON.stringify(updated))
+      return updated
+    })
+
+    // Fetch and sync immediately
+    handleFetchAndPushWeather(loc)
+  }
+
+  const handleDeleteRecentLocation = (locToDelete) => {
+    setRecentLocations(prev => {
+      const updated = prev.filter(item => 
+        !(item.lat === locToDelete.lat && item.lon === locToDelete.lon)
+      )
+      localStorage.setItem('mochi-recent-locations', JSON.stringify(updated))
+      return updated
+    })
+  }
+
   const handleTriggerMode = (key, mode, cmd) => {
-    if (mode === 'clock') {
+    if (mode === 'animation') {
+      handleWriteSerial('1')
+      setActiveMode('animation')
+    } else if (mode === 'clock') {
       // Auto-sync system time on Clock Mode switch
       const now = new Date()
       const hh = String(now.getHours()).padStart(2, '0')
@@ -474,8 +659,9 @@ export default function App() {
     } else if (mode === 'usage') {
       // Refresh usage immediately rather than waiting on the 60s poll
       handleTestUsage()
+    } else if (mode === 'weather') {
+      handleFetchAndPushWeather()
     } else {
-      // Send command to ESP32
       handleWriteSerial(cmd)
       setActiveMode(mode)
     }
@@ -557,13 +743,20 @@ export default function App() {
         activeMode={activeMode}
         onClose={() => setActiveMode(null)}
         onWriteSerial={handleWriteSerial}
+        onRefreshWeather={() => handleFetchAndPushWeather(selectedLocation)}
         isConnected={isConnected}
         activeAlarm={activeAlarm}
         activeTimer={activeTimer}
         isPomoActive={isPomoActive}
         usage={usage}
+        weatherData={weatherData}
         alarms={alarms}
         setAlarms={setAlarms}
+        selectedLocation={selectedLocation}
+        recentLocations={recentLocations}
+        onLocationChange={handleLocationChange}
+        onSearchLocations={handleSearchLocations}
+        onDeleteRecentLocation={handleDeleteRecentLocation}
       />
 
       {/* Bottom control chrome bar (Warm, low-contrast design) */}
@@ -596,7 +789,9 @@ export default function App() {
         {/* Right side: configuration control popover */}
         <div className="flex items-center gap-2 pointer-events-auto relative config-menu-container">
           {showConfigMenu && (
-            <div className="absolute bottom-10 right-0 z-30 w-40 bg-room-bg/90 border border-ascii-mid/20 rounded-lg p-2 font-mono text-[10px] text-ascii-bright/80 backdrop-blur shadow-xl flex flex-col gap-1">
+            <div className="absolute bottom-10 right-0 z-30 w-48 bg-room-bg/95 border border-ascii-mid/20 rounded-lg p-2 font-mono text-[10px] text-ascii-bright/80 backdrop-blur shadow-xl flex flex-col gap-1.5 max-h-[320px] overflow-y-auto">
+              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pb-1">System Controls</div>
+              
               <button
                 onClick={() => {
                   setCalibrateMode(!calibrateMode)
@@ -634,6 +829,90 @@ export default function App() {
               >
                 🎨 Tune Mascot
               </button>
+
+              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Screen</div>
+              <button
+                onClick={() => handleWriteSerial('b')}
+                className="w-full text-left px-2 py-1.2 rounded hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70 transition-all cursor-pointer"
+              >
+                💡 Toggle Backlight
+              </button>
+              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Idle Face Switch — every ~{idleIntervalSec}s</div>
+              <div className="grid grid-cols-4 gap-1 px-1">
+                {[3, 5, 8, 15, 30, 60].map(s => (
+                  <button
+                    key={s}
+                    onClick={() => { handleWriteSerial(`I${s}\n`); setIdleIntervalSec(s) }}
+                    className={`py-1 rounded text-[9px] font-mono font-bold cursor-pointer transition-all border ${
+                      idleIntervalSec === s
+                        ? 'bg-[#d97756]/20 border-[#d97756]/60 text-[#f0b89a]'
+                        : 'bg-ascii-dim/10 border-ascii-mid/20 text-ascii-mid hover:border-ascii-mid/40 hover:text-ascii-bright'
+                    }`}
+                  >
+                    {s}s
+                  </button>
+                ))}
+              </div>
+
+              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Test Modes</div>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { label: 'Expr', cmd: '1', mode: 'animation' },
+                  { label: 'Clock', cmd: '2', mode: 'clock' },
+                  { label: 'Pomo', cmd: '3', mode: 'pomodoro' },
+                  { label: 'Term', cmd: '4', mode: 'terminal' },
+                  { label: 'Usage', cmd: '5', mode: 'usage' },
+                  { label: 'Wx', cmd: '6', mode: 'weather' }
+                ].map((item) => (
+                  <button
+                    key={item.cmd}
+                    onClick={async () => {
+                      if (item.mode === 'clock') {
+                        const now = new Date()
+                        const hh = String(now.getHours()).padStart(2, '0')
+                        const mm = String(now.getMinutes()).padStart(2, '0')
+                        await handleWriteSerial(`2t${hh}${mm}\n`)
+                      } else if (item.mode === 'usage') {
+                        handleTestUsage()
+                      } else {
+                        await handleWriteSerial(item.cmd)
+                      }
+                      setActiveMode(item.mode)
+                    }}
+                    className={`px-1 py-1 rounded border text-center transition-all cursor-pointer text-[9px] ${
+                      activeMode === item.mode
+                        ? 'bg-ascii-spark/10 border-ascii-spark text-ascii-spark font-bold'
+                        : 'bg-ascii-bright/5 border-ascii-mid/10 hover:border-ascii-spark hover:text-ascii-spark'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Test Weather</div>
+              <div className="flex flex-col gap-1">
+                {[
+                  { label: '☀️ Clear', cmd: 'W0,30,32,80,Ho Chi Minh City,Clear Sky\n' },
+                  { label: '☁️ Cloudy', cmd: 'W3,25,27,85,Ho Chi Minh City,Partly Cloudy\n' },
+                  { label: '🌫️ Fog', cmd: 'W45,20,20,95,Ho Chi Minh City,Foggy\n' },
+                  { label: '🌧️ Rain', cmd: 'W61,22,22,90,Ho Chi Minh City,Light Drizzle\n' },
+                  { label: '⛈️ Storm', cmd: 'W95,18,18,98,Ho Chi Minh City,Thunderstorm\n' }
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    onClick={async () => {
+                      await handleWriteSerial(item.cmd)
+                      await handleWriteSerial('6')
+                      setActiveMode('weather')
+                    }}
+                    className="w-full text-left px-2 py-1 rounded hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70 transition-all cursor-pointer text-[9px] flex items-center justify-between"
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-[8px] text-ascii-dim font-mono">Send</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
