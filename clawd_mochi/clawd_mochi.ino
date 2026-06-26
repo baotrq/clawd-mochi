@@ -126,6 +126,7 @@ uint32_t pomodoroPhaseStart = 0;
 bool     pomodoroRinging    = false;
 uint32_t pomoRingingFlashAt = 0;
 bool     pomoRingingFlashOn = false;
+uint32_t pomoRingStartAt    = 0;
 uint32_t pomoWorkMs         = 25UL * 60000;
 uint32_t pomoBreakMs        =  5UL * 60000;
 uint32_t pomoStoppedAt      = 0;
@@ -135,10 +136,11 @@ uint32_t pomoIdleNextAt     = 0;
 
 // ── Alarm ────────────────────────────────────────────────────────────
 bool     alarmArmed    = false;
-bool     alarmRinging  = false;
-uint32_t alarmAtMillis = 0;
-uint32_t alarmFlashAt  = 0;
-bool     alarmFlashOn  = false;
+bool     alarmRinging    = false;
+uint32_t alarmAtMillis   = 0;
+uint32_t alarmFlashAt    = 0;
+bool     alarmFlashOn    = false;
+uint32_t alarmRingStartAt = 0;
 
 // ── Timer ────────────────────────────────────────────────────────────
 bool     timerActive     = false;
@@ -1605,6 +1607,7 @@ void updatePomodoro() {
     pomodoroOnBreak    = !pomodoroOnBreak;
     pomodoroRinging    = true;
     pomoRingingFlashAt = 0;
+    pomoRingStartAt    = millis();
     lastSec = 0xFFFF;
     Serial.println(pomodoroOnBreak ? "POMO_WORK_END" : "POMO_BREAK_END");
   } else {
@@ -1617,20 +1620,29 @@ void updatePomodoro() {
 
 void updatePomoFlash() {
   if (!pomodoroActive || !pomodoroRinging) return;
+
+  // Auto-dismiss after 10s and start the new phase cleanly
+  if (millis() - pomoRingStartAt >= 10000UL) {
+    pomodoroRinging    = false;
+    pomodoroPhaseStart = millis();  // new phase starts from now
+    if (currentMode == MODE_POMODORO) {
+      drawPomodoroStatic();
+      uint8_t mm, ss; pomodoroRemaining(mm, ss);
+      drawPomodoroTime(mm, ss);
+    }
+    return;
+  }
+
   if (millis() - pomoRingingFlashAt < 300) return;
   pomoRingingFlashAt = millis();
   pomoRingingFlashOn = !pomoRingingFlashOn;
-  
+
   uint16_t bg = pomoRingingFlashOn ? C_ORANGE : C_WHITE;
   uint16_t fg = pomoRingingFlashOn ? C_WHITE  : C_ORANGE;
   tft.fillScreen(bg);
   tft.setTextColor(fg); tft.setTextSize(3);
   tft.setCursor(30, DISP_H / 2 - 12);
-  if (pomodoroOnBreak) {
-    tft.print("BREAK!");
-  } else {
-    tft.print("FOCUS!");
-  }
+  tft.print(pomodoroOnBreak ? "BREAK!" : "FOCUS!");
 }
 
 void checkPomodoroTimeout() {
@@ -1651,13 +1663,21 @@ void checkPomodoroTimeout() {
 void checkAlarm() {
   if (alarmArmed && millis() >= alarmAtMillis) {
     alarmArmed   = false;
-    alarmRinging = true;
-    alarmFlashAt = 0;
+    alarmRinging    = true;
+    alarmFlashAt    = 0;
+    alarmRingStartAt = millis();
   }
 }
 
 void updateAlarmFlash() {
   if (!alarmRinging) return;
+
+  // Auto-dismiss after 10s
+  if (millis() - alarmRingStartAt >= 10000UL) {
+    dismissAlarm();
+    return;
+  }
+
   if (millis() - alarmFlashAt < 300) return;
   alarmFlashAt = millis();
   alarmFlashOn = !alarmFlashOn;
