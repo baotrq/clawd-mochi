@@ -113,7 +113,7 @@ uint16_t animBgColor  = 0;   // background for eye/logo animations
 // ── Clock (no RTC — tracked from millis(), defaults to 00:00 at boot
 //    unless set with 't'; behaves as a stopwatch until then) ───────────
 uint32_t clockBaseMillis   = 0;
-uint16_t clockBaseMinutes  = 0;   // minutes-since-midnight at clockBaseMillis
+uint32_t clockBaseSeconds  = 0;   // seconds-since-midnight at clockBaseMillis
 // ── Idle cycle: ANIM → CLOCK → WEATHER → USAGE → ANIM (3-5 min each) ─
 uint8_t  idlePhase    = 0;   // 0=anim 1=clock 2=weather 3=usage
 uint32_t idlePhaseAt  = 0;   // millis when current phase started
@@ -554,8 +554,8 @@ void drawDroopyEyes(int16_t openH) {
 // ═════════════════════════════════════════════════════════════
 
 uint16_t clockNowMinutes() {
-  uint32_t elapsedMin = (millis() - clockBaseMillis) / 60000UL;
-  return (clockBaseMinutes + elapsedMin) % 1440;
+  uint32_t nowSec = (clockBaseSeconds + (millis() - clockBaseMillis) / 1000UL) % 86400UL;
+  return nowSec / 60;
 }
 
 void drawClockView() {
@@ -1324,7 +1324,7 @@ void submitInput() {
     int val = inputBuf.toInt();
     uint8_t hh = (val / 100) % 24;
     uint8_t mm = (val % 100) > 59 ? 59 : (val % 100);
-    clockBaseMinutes = hh * 60 + mm;
+    clockBaseSeconds = (uint32_t)(hh * 60 + mm) * 60UL;
     clockBaseMillis  = millis();
     Serial.print("Clock set to "); Serial.println(inputBuf);
   } else if (inputKind == INPUT_ALARM_SET) {
@@ -2436,6 +2436,17 @@ void handleChar(char c) {
     return;
   }
 
+  // Ring the alarm immediately. The web has accurate time (the ESP has no
+  // RTC and drifts), so it owns alarm timing and sends 'R' at its own
+  // countdown T-0 — no drifting ESP-side countdown, no input-prompt flash.
+  if (c == 'R') {
+    alarmArmed       = false;
+    alarmRinging     = true;
+    alarmFlashAt     = 0;
+    alarmRingStartAt = millis();
+    return;
+  }
+
   // Dismiss alarm/timer on any user key — but silently drop 'U'/'W' start
   // chars (the web's auto usage/weather push) so they don't kill the ring.
   if (alarmRinging || timerRinging) {
@@ -2466,17 +2477,20 @@ void handleChar(char c) {
 
   if (collectingClockSet) {
     if (c == '\n' || c == '\r') {
-      if (clockSetBuf.length() == 4) {
-        int val = clockSetBuf.toInt();
-        uint8_t hh = (val / 100) % 24;
-        uint8_t mm = (val % 100) > 59 ? 59 : (val % 100);
-        clockBaseMinutes = hh * 60 + mm;
+      // Web syncs seconds-precise (HHMMSS) so the displayed minute rolls
+      // over at the right wall-clock moment; HHMM (no seconds) still works.
+      if (clockSetBuf.length() == 6 || clockSetBuf.length() == 4) {
+        uint8_t hh = clockSetBuf.substring(0, 2).toInt() % 24;
+        uint8_t mm = clockSetBuf.substring(2, 4).toInt(); if (mm > 59) mm = 59;
+        uint8_t ss = clockSetBuf.length() == 6 ? clockSetBuf.substring(4, 6).toInt() : 0;
+        if (ss > 59) ss = 59;
+        clockBaseSeconds = (uint32_t)(hh * 60 + mm) * 60UL + ss;
         clockBaseMillis  = millis();
         if (currentMode == MODE_CLOCK) drawClockView(); // keep it accurate if already shown
       }
       collectingClockSet = false;
       clockSetBuf = "";
-    } else if (c >= '0' && c <= '9' && clockSetBuf.length() < 4) {
+    } else if (c >= '0' && c <= '9' && clockSetBuf.length() < 6) {
       clockSetBuf += c;
     }
     return;

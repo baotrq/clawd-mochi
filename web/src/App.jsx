@@ -298,45 +298,19 @@ export default function App() {
     return closestAlarm
   }
 
-  // Sync closest alarm to ESP32
+  // Track the closest upcoming alarm. The web owns alarm timing (it has
+  // accurate time; the board has no RTC and drifts), so we DON'T arm a
+  // countdown on the device — we just hold the target here and fire a
+  // one-shot ring ('R') at the exact moment in the expiry poll below.
   const wasConnectedRef = useRef(false)
   useEffect(() => {
     if (!isConnected) {
       wasConnectedRef.current = false
       return
     }
-    
-    const closest = getClosestAlarm(alarms)
-    const justConnected = !wasConnectedRef.current
     wasConnectedRef.current = true
-    
-    if (closest) {
-      if (justConnected || !activeAlarm || activeAlarm.targetTime !== closest.targetTime) {
-        const [hh, mm] = closest.time.split(':')
-        if (justConnected) {
-          setTimeout(() => {
-            writeSerial(`r${hh}${mm}\n`)
-            setActiveAlarm(closest)
-          }, 100)
-        } else {
-          writeSerial(`r${hh}${mm}\n`)
-          setActiveAlarm(closest)
-        }
-      }
-    } else {
-      if (justConnected || activeAlarm) {
-        if (justConnected) {
-          setTimeout(() => {
-            writeSerial('a')
-            setActiveAlarm(null)
-          }, 100)
-        } else {
-          writeSerial('a')
-          setActiveAlarm(null)
-        }
-      }
-    }
-  }, [alarms, activeAlarm, isConnected])
+    setActiveAlarm(getClosestAlarm(alarms))
+  }, [alarms, isConnected])
 
   // Incoming serial text arrives as arbitrary chunks, not line-aligned, so
   // buffer until we see a newline before checking for the device's status
@@ -396,14 +370,17 @@ export default function App() {
     const timer = setInterval(() => {
       const now = Date.now()
       if (activeAlarm && now >= activeAlarm.endTime) {
-        setActiveAlarm(null)
+        // Fire a one-shot ring on the device at the accurate T-0, then
+        // re-pick the next occurrence (tomorrow for a daily alarm).
+        if (isConnected) writeSerial('R\n')
+        setActiveAlarm(getClosestAlarm(alarms))
       }
       if (activeTimer && now >= activeTimer.endTime) {
         setActiveTimer(null)
       }
     }, 1000)
     return () => clearInterval(timer)
-  }, [activeAlarm, activeTimer])
+  }, [activeAlarm, activeTimer, alarms, isConnected])
 
   // Listen to keyboard shortcuts for calibration mode
   useEffect(() => {
@@ -449,7 +426,10 @@ export default function App() {
         const now = new Date()
         const hh = String(now.getHours()).padStart(2, '0')
         const mm = String(now.getMinutes()).padStart(2, '0')
-        await writeSerial(`T${hh}${mm}\n`)
+        const ss = String(now.getSeconds()).padStart(2, '0')
+        // Seconds-precise so the device clock rolls over at the right moment
+        // (the board has no RTC; minute-only sync drifts up to ~59s).
+        await writeSerial(`T${hh}${mm}${ss}\n`)
       } catch (err) {
         alert(`Failed to connect to ESP32: ${err.message}`)
       }
