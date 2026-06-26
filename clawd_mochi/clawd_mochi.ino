@@ -149,6 +149,7 @@ uint32_t timerAtMillis   = 0;
 uint32_t timerDurationMs = 0;
 uint32_t timerFlashAt    = 0;
 bool     timerFlashOn    = false;
+uint32_t timerRingStartAt = 0;
 
 // ── Cowsay ───────────────────────────────────────────────────────────
 bool     cowsayActive    = false;
@@ -1671,6 +1672,10 @@ void checkAlarm() {
 
 void updateAlarmFlash() {
   if (!alarmRinging) return;
+  if (millis() - alarmRingStartAt >= 10000UL) {
+    dismissAlarm();
+    return;
+  }
   if (millis() - alarmFlashAt < 300) return;
   alarmFlashAt = millis();
   alarmFlashOn = !alarmFlashOn;
@@ -1714,14 +1719,19 @@ void disarmTimer() {
 
 void checkTimer() {
   if (timerActive && millis() >= timerAtMillis) {
-    timerActive  = false;
-    timerRinging = true;
-    timerFlashAt = 0;
+    timerActive      = false;
+    timerRinging     = true;
+    timerFlashAt     = 0;
+    timerRingStartAt = millis();
   }
 }
 
 void updateTimerFlash() {
   if (!timerRinging) return;
+  if (millis() - timerRingStartAt >= 10000UL) {
+    dismissTimer();
+    return;
+  }
   if (millis() - timerFlashAt < 300) return;
   timerFlashAt = millis();
   timerFlashOn = !timerFlashOn;
@@ -2686,18 +2696,20 @@ void loop() {
   updateAlarmFlash();
   checkTimer();
   updateTimerFlash();
-  updatePomodoro();
-  updatePomoFlash();
-  updatePomodoroIdleAnim();
-  checkPomodoroTimeout();
-  manageIdleCycle();
-  maybeAutoShowUsage();
-  updateClockViewIfShown();
-  updateUsageViewIfShown();
-  if (currentMode == MODE_WEATHER) updateWeatherView();
+  if (!alarmRinging && !timerRinging) {
+    updatePomodoro();
+    updatePomoFlash();
+    updatePomodoroIdleAnim();
+    checkPomodoroTimeout();
+    manageIdleCycle();
+    maybeAutoShowUsage();
+    updateClockViewIfShown();
+    updateUsageViewIfShown();
+    if (currentMode == MODE_WEATHER) updateWeatherView();
 
-  if (dynamicMode && currentMode == MODE_ANIMATION && !busy && millis() >= nextIdleAnimAt) {
-    eyeView = EYE_NORMAL;
-    playRandomIdleAnim();
+    if (dynamicMode && currentMode == MODE_ANIMATION && !busy && millis() >= nextIdleAnimAt) {
+      eyeView = EYE_NORMAL;
+      playRandomIdleAnim();
+    }
   }
 }
