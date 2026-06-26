@@ -1671,13 +1671,6 @@ void checkAlarm() {
 
 void updateAlarmFlash() {
   if (!alarmRinging) return;
-
-  // Auto-dismiss after 10s
-  if (millis() - alarmRingStartAt >= 10000UL) {
-    dismissAlarm();
-    return;
-  }
-
   if (millis() - alarmFlashAt < 300) return;
   alarmFlashAt = millis();
   alarmFlashOn = !alarmFlashOn;
