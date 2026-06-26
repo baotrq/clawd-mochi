@@ -234,6 +234,7 @@ export default function App() {
   // Push usage to the device whenever it changes (not on every poll tick).
   // The board has no RTC, so it can't compute "resets in Xh Ym" itself —
   // we send minutes-remaining once and it counts down locally via millis().
+  const suppressWeatherFetchRef = useRef(false)
   const lastSentUsageRef = useRef(null)
   useEffect(() => {
     if (!usage || !isConnected) return
@@ -593,10 +594,15 @@ export default function App() {
   }
 
   // Auto-refresh weather every 2 minutes while in weather mode.
-  // Also fetches immediately on entering weather mode so data is always fresh.
+  // Skips the immediate fetch when a test-weather button was just used so
+  // the real API doesn't overwrite the test data straight away.
   useEffect(() => {
     if (activeMode !== 'weather') return
-    handleFetchAndPushWeather()
+    if (suppressWeatherFetchRef.current) {
+      suppressWeatherFetchRef.current = false
+    } else {
+      handleFetchAndPushWeather()
+    }
     const id = setInterval(() => handleFetchAndPushWeather(), 2 * 60 * 1000)
     return () => clearInterval(id)
   }, [activeMode]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -886,6 +892,7 @@ export default function App() {
                   <button
                     key={idx}
                     onClick={async () => {
+                      suppressWeatherFetchRef.current = true
                       await handleWriteSerial(item.cmd)
                       await handleWriteSerial('6')
                       setActiveMode('weather')
