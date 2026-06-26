@@ -1465,36 +1465,65 @@ void updatePomodoroIdleAnim() {
       break;
     }
 
-    case 3: {  // ── Splat ────────────────────────────
+    case 3: {  // ── Pixel splat ───────────────────────
       if (pomoIdleStep == 0) {
+        const uint8_t B = 8;
         tft.fillScreen(C_DARKBG);
         tft.fillRect(0, 0, DISP_W, 3, C_ORANGE);
 
-        // Dim ghost of the text
+        // Dim ghost text still readable behind splat
         tft.setTextColor(DIM); tft.setTextSize(5);
         tft.setCursor(TX, TY);
         tft.print("POMODORO");
 
-        // Main splat blob (hits left of text)
-        int16_t cx = 56, cy = 112;
-        tft.fillCircle(cx, cy, 38, RED);
-        tft.fillCircle(cx + 6, cy - 8, 20, RED2);
+        // ── Pixel art blob ───────────────────
+        // 0=skip 1=red 2=highlight
+        const uint8_t SPLAT[8][10] = {
+          {0,0,1,1,1,0,0,0,0,0},
+          {0,1,1,2,1,1,0,0,0,0},
+          {1,1,2,1,1,1,1,0,0,0},
+          {1,1,1,1,1,1,1,1,0,0},
+          {1,1,1,1,1,1,1,0,0,0},
+          {0,1,1,1,1,1,0,0,0,0},
+          {0,0,1,1,1,0,0,0,0,0},
+          {0,0,0,1,0,0,0,0,0,0},
+        };
+        int16_t bx = 0, by = 84;
+        for (uint8_t r = 0; r < 8; r++)
+          for (uint8_t c = 0; c < 10; c++) {
+            uint8_t v = SPLAT[r][c];
+            if (!v) continue;
+            tft.fillRect(bx + c*B, by + r*B, B, B, v==2 ? RED2 : RED);
+          }
 
-        // Splatter drops — fixed positions for consistency
-        const int16_t DX[] = {-48,-38, 30, 68, 90,120, 48,-20,150, 10, 80,-10};
-        const int16_t DY[] = {-22, 28,-42,-18, 20, -8, 38, 50, 30,-58,-44,-48};
-        const uint8_t DR[] = {  7,  5,  6,  8,  5,  6,  5,  6,  4,  5,  4,  4};
+        // Seeds inside blob
+        tft.fillRect(18, 100, 5, 9, DIM);
+        tft.fillRect(34, 116, 5, 9, DIM);
+        tft.fillRect(10, 124, 5, 9, DIM);
+
+        // Drip below blob
+        tft.fillRect(24, 148, B, B, RED);
+        tft.fillRect(24, 156, B, B, RED);
+        tft.fillRect(26, 164, 5, 5, RED);
+
+        // ── Pixel splatter drops ─────────────
+        const int16_t P8[][2] = {
+          { 96, 68},{120, 60},{144, 76},{168, 92},
+          {192, 88},{ 88,148},{112,156},{136,140},
+          { 48,152},{ 32, 56},{ 64, 44},{200,112},
+        };
         for (uint8_t i = 0; i < 12; i++)
-          tft.fillCircle(cx + DX[i], cy + DY[i], DR[i], RED);
+          tft.fillRect(P8[i][0], P8[i][1], B, B, RED);
 
-        // Pixel-art seeds in the blob
-        tft.fillRect(cx - 8,  cy - 6,  6, 10, DIM);
-        tft.fillRect(cx + 10, cy + 4,  6, 10, DIM);
-        tft.fillRect(cx - 2,  cy + 12, 6, 10, DIM);
+        const int16_t P4[][2] = {
+          {108,52},{152,52},{196,64},{216,100},{40,168},{220,128},
+        };
+        for (uint8_t i = 0; i < 6; i++)
+          tft.fillRect(P4[i][0], P4[i][1], 4, 4, RED);
       }
       pomoIdleStep++;
       pomoIdleNextAt = now + 50;
-      if (pomoIdleStep >= 50) { pomoIdlePhase = 0; pomoIdleStep = 0; }  // 2.5s hold then loop
+      if (pomoIdleStep >= 50) { pomoIdlePhase = 0; pomoIdleStep = 0; }
       break;
     }
   }
