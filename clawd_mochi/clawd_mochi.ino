@@ -1749,67 +1749,19 @@ void dismissTimer() {
 }
 
 void drawTimerStatic() {
-  uint16_t C_TEAL = tft.color565(0, 200, 170);
-  uint16_t C_DIM  = tft.color565(35, 33, 30);
-
   tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0, DISP_W, 3, C_TEAL);
-
-  tft.setTextColor(C_TEAL); tft.setTextSize(2);
-  tft.setCursor(90, 10);   // "TIMER" 5*12=60px wide; (240-60)/2=90
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(DISP_W / 2 - 15, 20);
   tft.print("TIMER");
-
-  tft.fillRect(8, 32, 224, 1, C_DIM);
 }
 
 void drawTimerTime(uint8_t mm, uint8_t ss) {
-  uint16_t C_TEAL = tft.color565(0, 200, 170);
-  uint16_t C_DIM  = tft.color565(35, 33, 30);
-  char buf[3];
-
-  tft.fillRect(0, 34, DISP_W, DISP_H - 34, C_DARKBG);
-
-  // Minutes — giant white
-  // size 7: 42px/char wide, 56px tall; 2 digits=84px; x=(240-84)/2=78
-  snprintf(buf, sizeof(buf), "%02d", mm);
-  tft.setTextColor(C_WHITE); tft.setTextSize(7);
-  tft.setCursor(78, 42);
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%02d:%02d", mm, ss);
+  tft.fillRect(0, 80, DISP_W, 80, C_DARKBG);
+  tft.setTextColor(C_WHITE); tft.setTextSize(6);
+  tft.setCursor(DISP_W / 2 - 72, 92);
   tft.print(buf);
-
-  tft.setTextColor(C_MUTED); tft.setTextSize(1);
-  tft.setCursor(111, 104);   // "min" 3*6=18px; (240-18)/2=111
-  tft.print("min");
-
-  tft.fillRect(60, 116, 120, 1, C_DIM);
-
-  // Seconds — medium teal
-  // size 4: 24px/char wide, 32px tall; 2 digits=48px; x=(240-48)/2=96
-  snprintf(buf, sizeof(buf), "%02d", ss);
-  tft.setTextColor(C_TEAL); tft.setTextSize(4);
-  tft.setCursor(96, 124);
-  tft.print(buf);
-
-  tft.setTextColor(C_MUTED); tft.setTextSize(1);
-  tft.setCursor(111, 162);
-  tft.print("sec");
-
-  // Depleting bar — starts full, shrinks to empty as countdown runs
-  uint32_t totalSec  = timerDurationMs / 1000UL;
-  uint32_t remainSec = (uint32_t)mm * 60 + ss;
-  uint8_t  active    = (totalSec > 0 && remainSec <= totalSec)
-                       ? (uint8_t)((uint32_t)remainSec * 12 / totalSec) : 12;
-  for (uint8_t i = 0; i < 12; i++)
-    tft.fillRect(8 + i * 19, 182, 14, 6, i < active ? C_TEAL : C_DIM);
-
-  // Total duration hint
-  char hint[16];
-  if (timerDurationMs < 120000UL)
-    snprintf(hint, sizeof(hint), "of %ds", (int)(timerDurationMs / 1000UL));
-  else
-    snprintf(hint, sizeof(hint), "of %dm", (int)(timerDurationMs / 60000UL));
-  tft.setTextColor(C_DIM); tft.setTextSize(1);
-  tft.setCursor(DISP_W / 2 - (int8_t)strlen(hint) * 3, 200);
-  tft.print(hint);
 }
 
 // ═════════════════════════════════════════════════════════════
