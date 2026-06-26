@@ -2370,8 +2370,79 @@ void handleChar(char c) {
     return;
   }
 
-  if (alarmRinging) { dismissAlarm(); return; }
-  if (timerRinging) { dismissTimer(); return; }
+  // Handle in-progress data streams before alarm/timer dismiss so that
+  // automatic web pushes (U=usage, W=weather) cannot kill the alarm ring.
+  if (wxCollecting) {
+    if (c == '\n' || c == '\r') {
+      int comma1 = wxBuf.indexOf(',');
+      int comma2 = wxBuf.indexOf(',', comma1 + 1);
+      int comma3 = wxBuf.indexOf(',', comma2 + 1);
+      if (comma1 != -1 && comma2 != -1 && comma3 != -1) {
+        uint8_t wmo = wxBuf.substring(0, comma1).toInt();
+        int8_t temp = wxBuf.substring(comma1 + 1, comma2).toInt();
+        int8_t feels = wxBuf.substring(comma2 + 1, comma3).toInt();
+        int comma4 = wxBuf.indexOf(',', comma3 + 1);
+        uint8_t hum;
+        if (comma4 != -1) {
+          hum = wxBuf.substring(comma3 + 1, comma4).toInt();
+          int comma5 = wxBuf.indexOf(',', comma4 + 1);
+          if (comma5 != -1) {
+            wxLoc = wxBuf.substring(comma4 + 1, comma5);
+            wxCondStr = wxBuf.substring(comma5 + 1);
+          } else {
+            wxLoc = wxBuf.substring(comma4 + 1);
+            wxCondStr = "";
+          }
+          wxLoc.trim();
+          if (wxLoc.length() > 20) wxLoc = wxLoc.substring(0, 20);
+          wxCondStr.trim();
+          if (wxCondStr.length() > 20) wxCondStr = wxCondStr.substring(0, 20);
+          if (wxLoc.length() == 0 || wxLoc == "HCMC") wxLoc = "Ho Chi Minh City";
+        } else {
+          hum = wxBuf.substring(comma3 + 1).toInt();
+          wxCondStr = "";
+          if (wxLoc.length() == 0 || wxLoc == "HCMC") wxLoc = "Ho Chi Minh City";
+        }
+        wx.cond = wmoToCondition(wmo);
+        wx.tempC = temp;
+        wx.feelsC = feels;
+        wx.humidity = hum;
+        wx.hasData = true;
+        if (currentMode == MODE_WEATHER) drawWeatherView();
+      }
+      wxCollecting = false;
+      wxBuf = "";
+    } else if (c >= 32 && c <= 126 && wxBuf.length() < 64) {
+      wxBuf += c;
+    }
+    return;
+  }
+
+  if (collectingUsage) {
+    if (c == '\n' || c == '\r') {
+      if (usageBuf.length() == 12) {
+        usageSessionPct      = usageBuf.substring(0, 2).toInt();
+        usageWeeklyPct       = usageBuf.substring(2, 4).toInt();
+        usageSessionResetMin = usageBuf.substring(4, 7).toInt();
+        usageWeeklyResetMin  = usageBuf.substring(7, 12).toInt();
+        usageReceivedMillis  = millis();
+        if (currentMode == MODE_USAGE) drawUsageView();
+      }
+      collectingUsage = false;
+      usageBuf = "";
+    } else if (c >= '0' && c <= '9' && usageBuf.length() < 12) {
+      usageBuf += c;
+    }
+    return;
+  }
+
+  // Dismiss alarm/timer on any user key — but silently drop 'U'/'W' start
+  // chars (the web's auto usage/weather push) so they don't kill the ring.
+  if (alarmRinging || timerRinging) {
+    if (c == 'U' || c == 'W') return;
+    if (alarmRinging) { dismissAlarm(); return; }
+    if (timerRinging) { dismissTimer(); return; }
+  }
   if (pomodoroActive && pomodoroRinging) {
     pomodoroRinging = false;
     pomodoroPhaseStart = millis();
@@ -2389,83 +2460,6 @@ void handleChar(char c) {
       idleBuf = "";
     } else if (c >= '0' && c <= '9') {
       idleBuf += c;
-    }
-    return;
-  }
-
-  if (wxCollecting) {
-    if (c == '\n' || c == '\r') {
-      int comma1 = wxBuf.indexOf(',');
-      int comma2 = wxBuf.indexOf(',', comma1 + 1);
-      int comma3 = wxBuf.indexOf(',', comma2 + 1);
-      if (comma1 != -1 && comma2 != -1 && comma3 != -1) {
-        uint8_t wmo = wxBuf.substring(0, comma1).toInt();
-        int8_t temp = wxBuf.substring(comma1 + 1, comma2).toInt();
-        int8_t feels = wxBuf.substring(comma2 + 1, comma3).toInt();
-        
-        int comma4 = wxBuf.indexOf(',', comma3 + 1);
-        uint8_t hum;
-        if (comma4 != -1) {
-          hum = wxBuf.substring(comma3 + 1, comma4).toInt();
-          int comma5 = wxBuf.indexOf(',', comma4 + 1);
-          if (comma5 != -1) {
-            wxLoc = wxBuf.substring(comma4 + 1, comma5);
-            wxCondStr = wxBuf.substring(comma5 + 1);
-          } else {
-            wxLoc = wxBuf.substring(comma4 + 1);
-            wxCondStr = "";
-          }
-          wxLoc.trim();
-          if (wxLoc.length() > 20) {
-            wxLoc = wxLoc.substring(0, 20);
-          }
-          wxCondStr.trim();
-          if (wxCondStr.length() > 20) {
-            wxCondStr = wxCondStr.substring(0, 20);
-          }
-          if (wxLoc.length() == 0 || wxLoc == "HCMC") {
-            wxLoc = "Ho Chi Minh City";
-          }
-        } else {
-          hum = wxBuf.substring(comma3 + 1).toInt();
-          wxCondStr = "";
-          if (wxLoc.length() == 0 || wxLoc == "HCMC") {
-            wxLoc = "Ho Chi Minh City";
-          }
-        }
-        
-        wx.cond = wmoToCondition(wmo);
-        wx.tempC = temp;
-        wx.feelsC = feels;
-        wx.humidity = hum;
-        wx.hasData = true;
-        
-        if (currentMode == MODE_WEATHER) {
-          drawWeatherView();
-        }
-      }
-      wxCollecting = false;
-      wxBuf = "";
-    } else if (c >= 32 && c <= 126 && wxBuf.length() < 64) {
-      wxBuf += c;
-    }
-    return;
-  }
-
-  if (collectingUsage) {
-    if (c == '\n' || c == '\r') {
-      if (usageBuf.length() == 12) { // SS WW RRR TTTTT
-        usageSessionPct      = usageBuf.substring(0, 2).toInt();
-        usageWeeklyPct       = usageBuf.substring(2, 4).toInt();
-        usageSessionResetMin = usageBuf.substring(4, 7).toInt();
-        usageWeeklyResetMin  = usageBuf.substring(7, 12).toInt();
-        usageReceivedMillis  = millis();
-        if (currentMode == MODE_USAGE) drawUsageView();
-      }
-      collectingUsage = false;
-      usageBuf = "";
-    } else if (c >= '0' && c <= '9' && usageBuf.length() < 12) {
-      usageBuf += c;
     }
     return;
   }
