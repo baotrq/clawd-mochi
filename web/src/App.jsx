@@ -121,41 +121,34 @@ export default function App() {
     return () => clearInterval(trackTimer)
   }, [])
 
-  // Animated Favicon loop
-  useEffect(() => {
-    const faviconFrames = [0, 1, 2, 3, 4].map((i) => `/favicon/frame${i}.png`)
-    let frameIdx = 0
-
-    let faviconLink = document.querySelector("link[rel~='icon']")
-    if (!faviconLink) {
-      faviconLink = document.createElement('link')
-      faviconLink.rel = 'icon'
-      document.getElementsByTagName('head')[0].appendChild(faviconLink)
-    }
-    faviconLink.type = 'image/png'
-
-    const interval = setInterval(() => {
-      frameIdx = (frameIdx + 1) % faviconFrames.length
-      faviconLink.href = faviconFrames[frameIdx]
-    }, 250) // update frame every 250ms
-
-    return () => clearInterval(interval)
-  }, [])
-
   // Claude Pro usage polling (5h session % / 7d weekly %)
   const [usage, setUsage] = useState(null) // { sessionPct, weeklyPct, sessionResetAt, weeklyResetAt } | null
 
+  // Try the relative /api/usage first (works via the Vite dev-server
+  // middleware when running `npm run dev` locally). That route doesn't
+  // exist on static hosting (e.g. GitHub Pages), so fall back to the local
+  // usage-bridge script (web/scripts/usage-bridge.mjs) on localhost — it
+  // reads the same local credentials and serves the same shape with CORS
+  // enabled for the hosted origin. If neither is reachable, usage is null.
+  const fetchUsageFrom = async (url) => {
+    const res = await fetch(url)
+    const data = await res.json()
+    if (!res.ok || data.error) throw new Error(data?.error || `HTTP ${res.status}`)
+    return data
+  }
+
   const pollUsage = async () => {
-    try {
-      const res = await fetch('/api/usage')
-      const data = await res.json()
-      const next = res.ok && !data.error ? data : null
-      setUsage(next)
-      return next
-    } catch {
-      setUsage(null)
-      return null
+    for (const url of ['/api/usage', 'http://localhost:8787/api/usage']) {
+      try {
+        const data = await fetchUsageFrom(url)
+        setUsage(data)
+        return data
+      } catch {
+        // try the next source
+      }
     }
+    setUsage(null)
+    return null
   }
 
   useEffect(() => {
