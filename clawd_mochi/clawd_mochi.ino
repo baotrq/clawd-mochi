@@ -2624,7 +2624,7 @@ void setup() {
   animLogoReveal();
   switchMode(MODE_ANIMATION);
   idlePhaseAt  = millis();
-  idlePhaseDur = (3 + random(3)) * 60000UL;
+  idlePhaseDur = random(30, 90) * 1000UL;  // first glance in 30-90 s
 
   Serial.println("Clawd Mochi ready.");
   Serial.println("Modes: 1=Animation 2=Clock 3=Pomodoro 4=Terminal 5=Usage 6=Weather");
@@ -2643,44 +2643,49 @@ void setup() {
 // ═════════════════════════════════════════════════════════════
 
 // Idle cycle: ANIM (3-5 min) → CLOCK → WEATHER → USAGE → ANIM.
-// Gated by dynamicMode — the same toggle as "Let Claude Vibe".
-// Weather and Usage phases are skipped if no data has been pushed yet.
-// Resets gracefully if the user manually changes mode.
+// Clawd idles in animation mode, then randomly glances at clock / weather /
+// usage for a short random time, then returns to animation.
+// idlePhase 0 = lounging in animation, 1 = mid-glance.
 void manageIdleCycle() {
   if (busy || alarmRinging || pomodoroRinging || timerRinging) return;
 
   uint32_t now = millis();
 
-  bool onTrack = (idlePhase == 0 && currentMode == MODE_ANIMATION)
-              || (idlePhase == 1 && currentMode == MODE_CLOCK)
-              || (idlePhase == 2 && currentMode == MODE_WEATHER)
-              || (idlePhase == 3 && currentMode == MODE_USAGE);
+  if (idlePhase == 0) {
+    if (currentMode != MODE_ANIMATION) return; // user navigated away — hands off
+    if (now - idlePhaseAt < idlePhaseDur) return;
 
-  if (!onTrack) {
+    // Pick a random info screen to glance at
+    uint8_t opts[3]; uint8_t n = 0;
+    opts[n++] = 1;                            // clock always available
+    if (wx.hasData)          opts[n++] = 2;  // weather if we have data
+    if (usageSessionPct >= 0) opts[n++] = 3; // usage if pushed
+
+    uint8_t pick = opts[random(n)];
+    idlePhase    = 1;
+    idlePhaseAt  = now;
+    idlePhaseDur = random(15, 40) * 1000UL;  // glance for 15-40 s
+
+    switch (pick) {
+      case 1: switchMode(MODE_CLOCK);   break;
+      case 2: switchMode(MODE_WEATHER); break;
+      case 3: switchMode(MODE_USAGE);   break;
+    }
+  } else {
+    // Mid-glance — if user went back early, respect that
     if (currentMode == MODE_ANIMATION) {
       idlePhase    = 0;
       idlePhaseAt  = now;
-      idlePhaseDur = (3 + random(3)) * 60000UL;
+      idlePhaseDur = random(60, 180) * 1000UL;
+      return;
     }
-    return;
-  }
+    if (now - idlePhaseAt < idlePhaseDur) return;
 
-  if (now - idlePhaseAt < idlePhaseDur) return;
-
-  uint8_t next = (idlePhase + 1) % 4;
-  if (next == 2 && !wx.hasData)       next = 3; // skip weather → try usage
-  if (next == 3 && usageSessionPct < 0) next = 0; // skip usage → back to anim
-  if (next == 2 && !wx.hasData)       next = 0; // both skipped
-
-  idlePhase    = next;
-  idlePhaseAt  = now;
-  idlePhaseDur = (3 + random(3)) * 60000UL;
-
-  switch (next) {
-    case 0: switchMode(MODE_ANIMATION); break;
-    case 1: switchMode(MODE_CLOCK);     break;
-    case 2: switchMode(MODE_WEATHER);   break;
-    case 3: switchMode(MODE_USAGE);     break;
+    // Done glancing — return to animation and wait before next glance
+    idlePhase    = 0;
+    idlePhaseAt  = now;
+    idlePhaseDur = random(60, 180) * 1000UL;  // lounge 1-3 min before next
+    switchMode(MODE_ANIMATION);
   }
 }
 
