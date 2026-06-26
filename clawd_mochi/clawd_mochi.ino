@@ -129,6 +129,9 @@ bool     pomoRingingFlashOn = false;
 uint32_t pomoWorkMs         = 25UL * 60000;
 uint32_t pomoBreakMs        =  5UL * 60000;
 uint32_t pomoStoppedAt      = 0;
+uint8_t  pomoIdlePhase      = 0;   // idle tomato animation phase
+uint8_t  pomoIdleStep       = 0;
+uint32_t pomoIdleNextAt     = 0;
 
 // ── Alarm ────────────────────────────────────────────────────────────
 bool     alarmArmed    = false;
@@ -1376,28 +1379,183 @@ void handleInputChar(char c) {
 // ═════════════════════════════════════════════════════════════
 
 void drawPomodoroIdle() {
-  tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
-  tft.setTextColor(C_WHITE); tft.setTextSize(3);
-  tft.setCursor(DISP_W / 2 - 72, DISP_H / 2 - 12);
-  tft.print("POMODORO");
+  // Reset animation; updatePomodoroIdleAnim() handles all drawing
+  pomoIdlePhase  = 0;
+  pomoIdleStep   = 0;
+  pomoIdleNextAt = 0;
+}
+
+// Pixel art tomato: 0=skip, 1=red, 2=highlight, 3=leaf, 4=stem
+static const uint8_t TOM_PIX[8][8] = {
+  {0,3,3,3,0,0,0,0},
+  {0,0,4,0,0,0,0,0},
+  {0,1,1,1,1,1,0,0},
+  {1,1,2,1,1,1,1,0},
+  {1,1,1,1,1,1,1,0},
+  {1,1,1,1,1,1,1,0},
+  {0,1,1,1,1,1,0,0},
+  {0,0,1,1,1,0,0,0},
+};
+
+void drawTomPixel(int16_t ox, int16_t oy, uint8_t B) {
+  uint16_t RED  = tft.color565(210, 38, 18);
+  uint16_t RED2 = tft.color565(255, 110, 70);
+  uint16_t GRN  = tft.color565(55, 175, 25);
+  uint16_t SGRN = tft.color565(28, 115, 12);
+  for (uint8_t r = 0; r < 8; r++) {
+    for (uint8_t c = 0; c < 8; c++) {
+      uint8_t v = TOM_PIX[r][c];
+      if (!v) continue;
+      uint16_t col = (v==1)?RED:(v==2)?RED2:(v==3)?GRN:SGRN;
+      tft.fillRect(ox + c*B, oy + r*B, B, B, col);
+    }
+  }
+}
+
+void updatePomodoroIdleAnim() {
+  if (currentMode != MODE_POMODORO || pomodoroActive) return;
+  uint32_t now = millis();
+  if (now < pomoIdleNextAt) return;
+
+  const uint16_t RED  = tft.color565(210, 38, 18);
+  const uint16_t RED2 = tft.color565(255, 110, 70);
+  const uint16_t DIM  = tft.color565(35, 33, 30);
+  // "POMODORO" size 5: each char 30px wide, 8 chars = 240px — fits edge to edge
+  const int16_t TX = 0, TY = 92;
+
+  switch (pomoIdlePhase) {
+
+    case 0: {  // ── Title appears ────────────────────
+      tft.fillScreen(C_DARKBG);
+      tft.fillRect(0, 0, DISP_W, 3, C_ORANGE);
+      tft.setTextColor(C_WHITE); tft.setTextSize(5);
+      tft.setCursor(TX, TY);
+      tft.print("POMODORO");
+      pomoIdlePhase = 1;
+      pomoIdleStep  = 0;
+      pomoIdleNextAt = now + 1400;
+      break;
+    }
+
+    case 1: {  // ── Tomato flies in ──────────────────
+      // 15 steps: x from 252 → 12 (240px / 16 steps ≈ 15px each)
+      int16_t tx = 252 - pomoIdleStep * 16;
+      int16_t ty = 92;
+
+      // Redraw bg + text each frame to erase previous tomato
+      tft.fillScreen(C_DARKBG);
+      tft.fillRect(0, 0, DISP_W, 3, C_ORANGE);
+      tft.setTextColor(C_WHITE); tft.setTextSize(5);
+      tft.setCursor(TX, TY);
+      tft.print("POMODORO");
+
+      drawTomPixel(tx, ty, 8);
+
+      pomoIdleStep++;
+      pomoIdleNextAt = now + 32;
+      if (pomoIdleStep >= 16) { pomoIdlePhase = 2; pomoIdleStep = 0; }
+      break;
+    }
+
+    case 2: {  // ── Impact flash ─────────────────────
+      tft.fillScreen(pomoIdleStep % 2 == 0 ? RED : C_DARKBG);
+      pomoIdleStep++;
+      pomoIdleNextAt = now + 70;
+      if (pomoIdleStep >= 4) { pomoIdlePhase = 3; pomoIdleStep = 0; }
+      break;
+    }
+
+    case 3: {  // ── Splat ────────────────────────────
+      if (pomoIdleStep == 0) {
+        tft.fillScreen(C_DARKBG);
+        tft.fillRect(0, 0, DISP_W, 3, C_ORANGE);
+
+        // Dim ghost of the text
+        tft.setTextColor(DIM); tft.setTextSize(5);
+        tft.setCursor(TX, TY);
+        tft.print("POMODORO");
+
+        // Main splat blob (hits left of text)
+        int16_t cx = 56, cy = 112;
+        tft.fillCircle(cx, cy, 38, RED);
+        tft.fillCircle(cx + 6, cy - 8, 20, RED2);
+
+        // Splatter drops — fixed positions for consistency
+        const int16_t DX[] = {-48,-38, 30, 68, 90,120, 48,-20,150, 10, 80,-10};
+        const int16_t DY[] = {-22, 28,-42,-18, 20, -8, 38, 50, 30,-58,-44,-48};
+        const uint8_t DR[] = {  7,  5,  6,  8,  5,  6,  5,  6,  4,  5,  4,  4};
+        for (uint8_t i = 0; i < 12; i++)
+          tft.fillCircle(cx + DX[i], cy + DY[i], DR[i], RED);
+
+        // Pixel-art seeds in the blob
+        tft.fillRect(cx - 8,  cy - 6,  6, 10, DIM);
+        tft.fillRect(cx + 10, cy + 4,  6, 10, DIM);
+        tft.fillRect(cx - 2,  cy + 12, 6, 10, DIM);
+      }
+      pomoIdleStep++;
+      pomoIdleNextAt = now + 50;
+      if (pomoIdleStep >= 50) { pomoIdlePhase = 0; pomoIdleStep = 0; }  // 2.5s hold then loop
+      break;
+    }
+  }
 }
 
 void drawPomodoroStatic() {
+  uint16_t phaseCol = pomodoroOnBreak
+    ? tft.color565(70, 110, 220)
+    : C_ORANGE;
+
   tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
-  tft.setTextColor(pomodoroOnBreak ? C_GREEN : C_ORANGE); tft.setTextSize(2);
-  tft.setCursor(20, 30);
-  tft.print(pomodoroOnBreak ? "BREAK" : "FOCUS");
+  tft.fillRect(0, 0, DISP_W, 3, phaseCol);
+
+  // Phase badge
+  const char* phase = pomodoroOnBreak ? "BREAK" : "FOCUS";
+  tft.setTextColor(phaseCol); tft.setTextSize(3);
+  tft.setCursor(DISP_W / 2 - strlen(phase) * 9, 16);
+  tft.print(phase);
+
+  tft.fillRect(8, 48, 224, 1, tft.color565(35, 33, 30));
+
+  // Bottom hint
+  tft.setTextColor(tft.color565(35, 33, 30)); tft.setTextSize(1);
+  tft.setCursor(DISP_W / 2 - 36, 220);
+  tft.print("p: pause / resume");
 }
 
 void drawPomodoroTime(uint8_t mm, uint8_t ss) {
+  uint16_t C_DIM = tft.color565(35, 33, 30);
+
+  // Clear dynamic zone
+  tft.fillRect(0, 54, DISP_W, 160, C_DARKBG);
+
+  // MM:SS countdown
   char buf[6];
   snprintf(buf, sizeof(buf), "%02d:%02d", mm, ss);
-  tft.fillRect(0, DISP_H / 2 - 30, DISP_W, 60, C_DARKBG);
   tft.setTextColor(C_WHITE); tft.setTextSize(5);
-  tft.setCursor(DISP_W / 2 - 60, DISP_H / 2 - 20);
+  tft.setCursor(45, 68);
   tft.print(buf);
+
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(DISP_W / 2 - 27, 120);
+  tft.print("remaining");
+
+  // Progress bar — dashes fill as time elapses
+  uint32_t phaseLen = pomodoroOnBreak ? pomoBreakMs : pomoWorkMs;
+  uint32_t totalSec = phaseLen / 1000;
+  uint32_t remainSec = (uint32_t)mm * 60 + ss;
+  uint32_t elapsedSec = totalSec > remainSec ? totalSec - remainSec : 0;
+  uint8_t  activeDashes = totalSec > 0 ? (uint8_t)(elapsedSec * 12 / totalSec) : 0;
+  uint16_t dashCol = pomodoroOnBreak ? tft.color565(70, 110, 220) : C_ORANGE;
+  for (uint8_t i = 0; i < 12; i++)
+    tft.fillRect(8 + i * 19, 138, 14, 6, i < activeDashes ? dashCol : C_DIM);
+
+  // Phase duration label
+  char label[18];
+  if (pomodoroOnBreak) snprintf(label, sizeof(label), "of %d min break", (int)(pomoBreakMs / 60000UL));
+  else                 snprintf(label, sizeof(label), "of %d min focus", (int)(pomoWorkMs  / 60000UL));
+  tft.setTextColor(C_DIM); tft.setTextSize(1);
+  tft.setCursor(DISP_W / 2 - strlen(label) * 3, 156);
+  tft.print(label);
 }
 
 void pomodoroRemaining(uint8_t &mm, uint8_t &ss) {
@@ -2488,6 +2646,7 @@ void loop() {
   updateTimerFlash();
   updatePomodoro();
   updatePomoFlash();
+  updatePomodoroIdleAnim();
   checkPomodoroTimeout();
   manageIdleCycle();
   maybeAutoShowUsage();
