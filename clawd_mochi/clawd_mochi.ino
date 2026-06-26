@@ -555,13 +555,101 @@ uint16_t clockNowMinutes() {
 void drawClockView() {
   uint16_t m = clockNowMinutes();
   uint8_t hh = m / 60, mm = m % 60;
-  char buf[6];
-  snprintf(buf, sizeof(buf), "%02d:%02d", hh, mm);
+  char buf[4];
+
+  uint16_t C_CARD = tft.color565(18, 22, 28);
+  uint16_t C_DIM  = tft.color565(35, 33, 30);
+
   tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
+  tft.fillRect(0, 0, DISP_W, 3, C_ORANGE);
+
+  // ── Hour card (left) ─────────────────────
+  tft.fillRoundRect(8, 42, 108, 84, 8, C_CARD);
   tft.setTextColor(C_WHITE); tft.setTextSize(6);
-  tft.setCursor(DISP_W / 2 - 72, DISP_H / 2 - 24);
+  snprintf(buf, sizeof(buf), "%02d", hh);
+  tft.setCursor(26, 60);
   tft.print(buf);
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(53, 133);
+  tft.print("HRS");
+
+  // ── Minute card (right) ──────────────────
+  tft.fillRoundRect(124, 42, 108, 84, 8, C_CARD);
+  tft.setTextColor(C_WHITE); tft.setTextSize(6);
+  snprintf(buf, sizeof(buf), "%02d", mm);
+  tft.setCursor(142, 60);
+  tft.print(buf);
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(166, 133);
+  tft.print("MIN");
+
+  // ── Colon dots ───────────────────────────
+  tft.fillRect(118, 72, 6, 6, C_MUTED);
+  tft.fillRect(118, 96, 6, 6, C_MUTED);
+
+  // ── Workday dashed bar, red → green (9 AM → 6 PM) ───
+  const uint16_t lunchStart = 12 * 60 + 30;
+  const uint16_t lunchEnd   = 13 * 60 + 30;
+  const uint16_t workStart  = 9  * 60;
+  const uint16_t workEnd    = 18 * 60;
+
+  tft.setTextColor(C_MUTED); tft.setTextSize(1);
+  tft.setCursor(8, 162);   tft.print("WORK");
+  tft.setCursor(208, 162); tft.print("HOME");
+
+  uint8_t activeDashes = 0;
+  if (m >= workStart && m < workEnd)
+    activeDashes = (uint32_t)(m - workStart) * 12 / (workEnd - workStart);
+  else if (m >= workEnd)
+    activeDashes = 12;
+
+  for (uint8_t i = 0; i < 12; i++) {
+    tft.fillRect(8 + i * 19, 174, 14, 6, i < activeDashes ? C_ORANGE : C_DIM);
+  }
+
+  // ── Single text line: random from message pool ───────────────
+  static const char* encMsgs[] = {
+    "let's get it!", "keep grinding!", "locked in.",
+    "you got this!", "stay focused.", "make it count.",
+    "no days off!", "heads down.", "push through!",
+    "eyes on the prize", "one step at a time", "almost there!",
+    "past halfway!", "keep moving.", "don't stop now!"
+  };
+  static const char* eggMsgs[] = {
+    "go touch grass", "drink water! >_<", "stretch break?",
+    "still here huh", "blink twice if ok", "have you eaten?",
+    "you look tired...", "vla go brrr", "robot uprising soon",
+    "404: chill not found", "skill issue?", "based.",
+    "no cap fr fr", "touch some grass bro", "we so back"
+  };
+
+  char statusBuf[22];
+  if (m < workStart) {
+    uint16_t left = workStart - m;
+    snprintf(statusBuf, sizeof(statusBuf), "starts in %dh %dm", left / 60, left % 60);
+  } else if (m >= workEnd) {
+    snprintf(statusBuf, sizeof(statusBuf), "done for today");
+  } else if (m >= lunchStart && m < lunchEnd) {
+    snprintf(statusBuf, sizeof(statusBuf), "back in %dm", lunchEnd - m);
+  } else {
+    uint16_t left = workEnd - m;
+    snprintf(statusBuf, sizeof(statusBuf), "%dh %dm left", left / 60, left % 60);
+  }
+
+  const char* lineText;
+
+  if (m >= lunchStart && m < lunchEnd && random(2) == 0) {
+    lineText = "enjoy lunch! :)";
+  } else {
+    uint8_t roll = random(10);
+    if      (roll < 4) { lineText = statusBuf;           }
+    else if (roll < 9) { lineText = encMsgs[random(15)]; }
+    else               { lineText = eggMsgs[random(15)]; }
+  }
+
+  tft.setTextColor(C_MUTED); tft.setTextSize(2);
+  tft.setCursor(DISP_W / 2 - strlen(lineText) * 6, 205);
+  tft.print(lineText);
 }
 
 // Minutes remaining, counted down locally from when the value was received
