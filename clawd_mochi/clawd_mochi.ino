@@ -1750,17 +1750,24 @@ void dismissTimer() {
 
 void drawTimerStatic() {
   tft.fillScreen(C_DARKBG);
+  // Thin accent lines framing the time
+  tft.fillRect(16, 86, 208, 1, C_MUTED);
+  tft.fillRect(16, 155, 208, 1, C_MUTED);
+  // Small label below bottom line
   tft.setTextColor(C_MUTED); tft.setTextSize(1);
-  tft.setCursor(DISP_W / 2 - 15, 20);
+  tft.setCursor(105, 165);   // "TIMER" 5*6=30px; (240-30)/2=105
   tft.print("TIMER");
 }
 
 void drawTimerTime(uint8_t mm, uint8_t ss) {
   char buf[6];
   snprintf(buf, sizeof(buf), "%02d:%02d", mm, ss);
-  tft.fillRect(0, 80, DISP_W, 80, C_DARKBG);
+  // Clear only the text zone — keeps the static lines and label intact
+  // Size 6: "MM:SS" = 5*36=180px wide, 48px tall; x=(240-180)/2=30, y=96
+  // Centre of 240×240 is exactly (120,120) — text centre is (30+90, 96+24) = (120,120) ✓
+  tft.fillRect(0, 92, DISP_W, 56, C_DARKBG);
   tft.setTextColor(C_WHITE); tft.setTextSize(6);
-  tft.setCursor(DISP_W / 2 - 72, 92);
+  tft.setCursor(30, 96);
   tft.print(buf);
 }
 
