@@ -138,18 +138,67 @@ export default function App() {
     'constituting rules...'
   ]
 
-  const TRACKS = [
-    'Ben Seretan – criss cross',
-    'Claude – sonnet 4.6 lo-fi',
-    'Mochi – chiptune sleep',
-    'Lofi Girl – coding session',
-    'Brian Eno – ambient coding',
-    'Aphex Twin – selected track'
+  const STREAMS = [
+    { name: 'Lofi Cafe', url: 'https://radio.loficafe.net/listen/chilling/radio.mp3' },
+    { name: 'Hotmix Lofi', url: 'https://streaming.hotmixradio.com/hotmix-lofi-en-mp3' },
+    { name: 'Chillhop Radio', url: 'https://streams.fluxfm.de/Chillhop/mp3-128/' }
   ]
 
   const [currentTime, setCurrentTime] = useState(new Date())
   const [statusIdx, setStatusIdx] = useState(0)
-  const [trackIdx, setTrackIdx] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [volume, setVolume] = useState(0.5)
+  const [streamIdx, setStreamIdx] = useState(0)
+  const [isMuted, setIsMuted] = useState(false)
+  const audioRef = useRef(null)
+
+  // Manage Audio element lifecycle
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(STREAMS[streamIdx].url)
+    } else {
+      audioRef.current.src = STREAMS[streamIdx].url
+    }
+    audioRef.current.volume = isMuted ? 0 : volume
+    audioRef.current.preload = 'none'
+    
+    if (isPlaying) {
+      audioRef.current.play().catch(err => {
+        console.error('Audio play failed:', err)
+        setIsPlaying(false)
+      })
+    } else {
+      audioRef.current.pause()
+    }
+  }, [streamIdx])
+
+  useEffect(() => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.play().catch(err => {
+          console.error('Audio play failed:', err)
+          setIsPlaying(false)
+        })
+      } else {
+        audioRef.current.pause()
+      }
+    }
+  }, [isPlaying])
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = isMuted ? 0 : volume
+    }
+  }, [volume, isMuted])
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+    }
+  }, [])
 
   // Update clock every second
   useEffect(() => {
@@ -717,12 +766,55 @@ export default function App() {
       <div className="absolute top-4 right-4 z-20 flex gap-2 items-center pointer-events-auto select-none">
         <div className="bg-room-bg/90 border border-ascii-mid/20 rounded-xl px-3 py-1.5 font-mono text-[10px] text-ascii-bright backdrop-blur shadow-xl flex items-center gap-3">
           {/* Music Widget */}
-          <div className="flex items-center gap-1.5 border-r border-ascii-mid/20 pr-3 select-none text-ascii-mid">
-            <span className="text-[#e05f3e] text-[13px] font-bold animate-pulse">♫ )</span>
-            <div className="w-[120px] overflow-hidden whitespace-nowrap relative flex items-center">
-              <div className="inline-block animate-marquee">
-                <span className="text-ascii-spark mr-8">{TRACKS[trackIdx]}</span>
-                <span className="text-ascii-spark mr-8">{TRACKS[trackIdx]}</span>
+          <div className="flex items-center gap-2 border-r border-ascii-mid/20 pr-3 select-none text-ascii-mid">
+            {/* Play/Pause Button */}
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className="text-[#e05f3e] hover:text-[#f27452] text-xs font-bold transition-all cursor-pointer w-4 h-4 flex items-center justify-center border border-ascii-mid/20 rounded bg-ascii-bright/5 hover:bg-ascii-bright/10 active:scale-95"
+              title={isPlaying ? 'Pause' : 'Play Lofi Radio'}
+            >
+              {isPlaying ? '⏸' : '▶'}
+            </button>
+
+            {/* Mute/Volume Button & Slider */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsMuted(!isMuted)}
+                className="text-ascii-mid hover:text-ascii-spark text-xs transition-colors cursor-pointer active:scale-95"
+                title={isMuted ? 'Unmute' : 'Mute'}
+              >
+                {isMuted || volume === 0 ? '🔇' : '🔊'}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={(e) => {
+                  setVolume(parseFloat(e.target.value))
+                  setIsMuted(false)
+                }}
+                className="w-10 h-1 bg-ascii-mid/20 rounded-lg appearance-none cursor-pointer accent-[#e05f3e] outline-none"
+              />
+            </div>
+
+            {/* Stream Selector */}
+            <select
+              value={streamIdx}
+              onChange={(e) => setStreamIdx(parseInt(e.target.value, 10))}
+              className="bg-room-bg-deep border border-ascii-mid/25 rounded px-1 py-0.5 text-ascii-spark font-mono text-[9px] outline-none cursor-pointer max-w-[90px] focus:border-ascii-spark"
+            >
+              {STREAMS.map((s, i) => (
+                <option key={i} value={i} className="bg-room-bg-deep text-ascii-spark">{s.name}</option>
+              ))}
+            </select>
+
+            {/* Marquee status */}
+            <div className="w-[70px] overflow-hidden whitespace-nowrap relative flex items-center">
+              <div className={`inline-block ${isPlaying ? 'animate-marquee' : ''}`}>
+                <span className="text-ascii-spark mr-8">{STREAMS[streamIdx].name}</span>
+                <span className="text-ascii-spark mr-8">{STREAMS[streamIdx].name}</span>
               </div>
             </div>
           </div>
