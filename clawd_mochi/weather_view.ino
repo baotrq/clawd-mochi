@@ -655,21 +655,22 @@ void updateWeatherView() {
     updateSnowAnimation(skyCol, C_WHITE);
   }
   else if (wx.cond == WC_WINDY) {
-    // 1. Erase old plane
+    // 1. Erase old plane (using exact previous bobbed y-coordinate to prevent trails)
+    int8_t prevPlaneY = planeY + ((wxFrame - 1) % 4 < 2 ? 0 : 1);
     if (planeX >= -4 && planeX < 65) {
-      fillPx(planeX, planeY, skyCol);
-      fillPx(planeX - 1, planeY, skyCol);
-      fillPx(planeX - 2, planeY, skyCol);
-      fillPx(planeX - 3, planeY, skyCol);
-      fillPx(planeX - 1, planeY - 1, skyCol);
-      fillPx(planeX - 1, planeY + 1, skyCol);
-      fillPx(planeX - 3, planeY - 1, skyCol);
+      fillPx(planeX, prevPlaneY, skyCol);
+      fillPx(planeX - 1, prevPlaneY, skyCol);
+      fillPx(planeX - 2, prevPlaneY, skyCol);
+      fillPx(planeX - 3, prevPlaneY, skyCol);
+      fillPx(planeX - 1, prevPlaneY - 1, skyCol);
+      fillPx(planeX - 1, prevPlaneY + 1, skyCol);
+      fillPx(planeX - 3, prevPlaneY - 1, skyCol);
     }
     
-    // Erase old person (size 6x6 at y=23)
+    // Erase old person (size 6x6 at constant x=35, y=23)
     for (int8_t r = 0; r < 6; r++) {
       for (int8_t c = 0; c < 6; c++) {
-        fillPx(windPersonX + c, 23 + r, skyCol);
+        fillPx(35 + c, 23 + r, skyCol);
       }
     }
     
@@ -677,14 +678,15 @@ void updateWeatherView() {
     drawCloud(cloudX[0], 2, CLOUD_MASK_1, skyCol);
     drawCloud(cloudX[1], 8, CLOUD_MASK_2, skyCol);
     
-    // 2. Update positions
-    if (wxFrame % 3 == 0) {
-      windPersonX--;
-      if (windPersonX < -6) {
-        windPersonX = 60;
-      }
-    }
+    // Swaying tree on the left (x=6)
+    uint16_t trunkCol = tft.color565(139, 69, 19);
+    uint16_t leafCol = tft.color565(34, 139, 34);
+    int8_t sway = (wxFrame % 8 < 4) ? 1 : 2;
     
+    // Erase old tree area
+    tft.fillRect(3 * PX, 22 * PX, 10 * PX, 7 * PX, skyCol);
+    
+    // 2. Update positions
     if (wxFrame % 2 == 0) {
       planeX++;
       if (planeX >= 80) {
@@ -721,11 +723,27 @@ void updateWeatherView() {
       fillPx(planeX - 3, currPlaneY - 1, planeCol);
     }
     
-    // 6. Draw person
-    int8_t personFrame = (windPersonX % 2 == 0) ? 0 : 1;
-    drawPerson(windPersonX, 23, personFrame, tft.color565(50, 50, 50));
+    // 6. Draw swaying tree
+    fillPx(6, 27, trunkCol);
+    fillPx(6, 28, trunkCol);
+    fillPx(6 + sway, 23, leafCol);
+    fillPx(5 + sway, 24, leafCol);
+    fillPx(6 + sway, 24, leafCol);
+    fillPx(7 + sway, 24, leafCol);
+    fillPx(4 + sway, 25, leafCol);
+    fillPx(5 + sway, 25, leafCol);
+    fillPx(6 + sway, 25, leafCol);
+    fillPx(7 + sway, 25, leafCol);
+    fillPx(8 + sway, 25, leafCol);
+    fillPx(5 + sway, 26, leafCol);
+    fillPx(6 + sway, 26, leafCol);
+    fillPx(7 + sway, 26, leafCol);
     
-    // 7. Redraw grass/ground line
+    // 7. Draw person (walking/running in place against the wind)
+    int8_t personFrame = (wxFrame % 6 < 3) ? 0 : 1;
+    drawPerson(35, 23, personFrame, tft.color565(50, 50, 50));
+    
+    // 8. Redraw grass/ground line
     tft.fillRect(0, 29 * PX, DISP_W, PX, tft.color565(34, 139, 34)); // draw grass
   }
 }
