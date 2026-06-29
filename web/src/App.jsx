@@ -46,52 +46,62 @@ function removeVietnameseTones(str) {
   return cleanStr;
 }
 
+// Names shown on the device must be plain ASCII (the firmware font has no
+// accents) and short enough to fit the ring screen. Strip tones, drop any
+// remaining non-printable chars, collapse whitespace, cap length.
+function asciiName(str) {
+  return removeVietnameseTones(str || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 18)
+}
+
 const STORAGE_KEY = 'mochi-hotspots-calib'
 
 const DEFAULT_HOTSPOTS = {
   painting: {
-    x: 0.2686,
+    x: 0.2672,
     y: 0.2633,
-    r: 0.08,
+    r: 0.0849,
     mode: 'animation',
     cmd: '1',
     label: 'Painting (Expression Mode)',
   },
   lock: {
-    x: 0.2787,
-    y: 0.4033,
+    x: 0.2783,
+    y: 0.4142,
     r: 0.0314,
     mode: 'clock',
     cmd: '2',
     label: 'Shelf Lock (Clock Mode)',
   },
   fan: {
-    x: 0.9435,
-    y: 0.278,
-    r: 0.0366,
+    x: 0.9441,
+    y: 0.2781,
+    r: 0.0443,
     mode: 'pomodoro',
     cmd: '3', // Sends 3 to switch to Pomodoro mode
     label: 'Spinning Fan (Pomodoro Mode)',
   },
   screen: {
-    x: 0.5437,
-    y: 0.4946,
-    r: 0.0387,
+    x: 0.5443,
+    y: 0.507,
+    r: 0.0665,
     mode: 'terminal',
     cmd: '4',
     label: 'Computer Screen (Terminal Mode)',
   },
   cat: {
-    x: 0.7742,
-    y: 0.1814,
-    r: 0.033,
+    x: 0.7667,
+    y: 0.18,
+    r: 0.0423,
     mode: 'usage',
     cmd: '5',
     label: 'Sleeping Cat (Claude Usage)',
   },
   window: {
-    x: 0.51,
-    y: 0.22,
+    x: 0.4325,
+    y: 0.2514,
     r: 0.09,
     mode: 'weather',
     cmd: '6',
@@ -234,7 +244,14 @@ export default function App() {
   // Push usage to the device whenever it changes (not on every poll tick).
   // The board has no RTC, so it can't compute "resets in Xh Ym" itself —
   // we send minutes-remaining once and it counts down locally via millis().
-  const suppressWeatherFetchRef = useRef(false)
+  // True while showing a Test Weather preview — suppresses all real API
+  // fetches so the test data on the device isn't overwritten. Cleared
+  // automatically when weather mode is left.
+  const [weatherTest, setWeatherTest] = useState(false)
+  const weatherTestRef = useRef(weatherTest)
+  useEffect(() => {
+    weatherTestRef.current = weatherTest
+  }, [weatherTest])
   const lastSentUsageRef = useRef(null)
   useEffect(() => {
     if (!usage || !isConnected) return
@@ -280,11 +297,24 @@ export default function App() {
 
     for (const alarm of enabledAlarms) {
       const [hh, mm] = alarm.time.split(':').map(Number)
-      const target = new Date()
+      const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6]
+      
+      let target = new Date(now)
       target.setHours(hh, mm, 0, 0)
+      
+      let daysChecked = 0
       if (target.getTime() <= now.getTime()) {
         target.setDate(target.getDate() + 1)
+        daysChecked = 1
       }
+      
+      while (!days.includes(target.getDay()) && daysChecked < 8) {
+        target.setDate(target.getDate() + 1)
+        daysChecked++
+      }
+
+      if (daysChecked >= 8) continue
+
       const diff = target.getTime() - now.getTime()
       if (diff < minDiff) {
         minDiff = diff
@@ -372,8 +402,12 @@ export default function App() {
       const now = Date.now()
       if (activeAlarm && now >= activeAlarm.endTime) {
         // Fire a one-shot ring on the device at the accurate T-0, then
-        // re-pick the next occurrence (tomorrow for a daily alarm).
-        if (isConnected) writeSerial('R\n')
+        // re-pick the next occurrence (tomorrow for a daily alarm). Pass the
+        // alarm's name so the device shows it instead of "ALARM!".
+        if (isConnected) {
+          const nm = asciiName(activeAlarm.name)
+          writeSerial(`R${nm ? ' ' + nm : ''}\n`)
+        }
         setActiveAlarm(getClosestAlarm(alarms))
       }
       if (activeTimer && now >= activeTimer.endTime) {
@@ -424,13 +458,8 @@ export default function App() {
 
         // Silently sync system time on connect — stays on whatever mode
         // the device is currently showing (default Animation), no panel pop
-        const now = new Date()
-        const hh = String(now.getHours()).padStart(2, '0')
-        const mm = String(now.getMinutes()).padStart(2, '0')
-        const ss = String(now.getSeconds()).padStart(2, '0')
-        // Seconds-precise so the device clock rolls over at the right moment
-        // (the board has no RTC; minute-only sync drifts up to ~59s).
-        await writeSerial(`T${hh}${mm}${ss}\n`)
+        const epoch = Math.floor(Date.now() / 1000)
+        await writeSerial(`T${epoch}\n`)
       } catch (err) {
         alert(`Failed to connect to ESP32: ${err.message}`)
       }
@@ -440,17 +469,18 @@ export default function App() {
   const handleWriteSerial = async (data) => {
     // Intercept alarm commands to manage list and sync closest automatically
     if (data.startsWith('r')) {
-      const match = data.match(/^r(\d{4})/)
+      const match = data.match(/^r(\d{4})(?: ([^\n]*))?/)
       if (match) {
         const hh = match[1].slice(0, 2)
         const mm = match[1].slice(2, 4)
         const alarmTime = `${hh}:${mm}`
+        const name = asciiName(match[2])
         setAlarms(prev => {
           const exists = prev.find(a => a.time === alarmTime)
           if (exists) {
-            return prev.map(a => a.time === alarmTime ? { ...a, enabled: true } : a)
+            return prev.map(a => a.time === alarmTime ? { ...a, enabled: true, name: name || a.name } : a)
           } else {
-            return [...prev, { time: alarmTime, enabled: true }]
+            return [...prev, { time: alarmTime, enabled: true, name, days: [0, 1, 2, 3, 4, 5, 6] }]
           }
         })
       }
@@ -471,12 +501,13 @@ export default function App() {
 
     // Parse commands to update UI state for Timer/Pomodoro
     if (data.startsWith('y')) {
-      const match = data.match(/^y(\d+)/)
+      const match = data.match(/^y(\d+)(?: ([^\n]*))?/)
       if (match) {
         const secs = parseInt(match[1], 10)
         setActiveTimer({
           durationSecs: secs,
           endTime: Date.now() + secs * 1000,
+          name: asciiName(match[2]),
         })
       }
     } else if (data === 'q') {
@@ -516,8 +547,12 @@ export default function App() {
   const owIdToWmo = (id) => {
     if (id === 800) return 0           // clear sky
     if (id >= 801 && id <= 804) return 2   // clouds → WC_CLOUDY
-    if (id >= 700 && id < 800) return 45   // atmosphere (mist, fog, haze) → WC_FOG
-    if (id >= 300 && id < 600) return 61   // drizzle, rain, snow → WC_RAIN
+    if (id >= 700 && id < 800) {
+      if (id === 771 || id === 781) return 771 // windy → WC_WINDY
+      return 45   // atmosphere (mist, fog, haze) → WC_FOG
+    }
+    if (id >= 600 && id < 700) return 71   // snow → WC_SNOWY
+    if (id >= 300 && id < 600) return 61   // drizzle, rain → WC_RAIN
     if (id >= 200 && id < 300) return 95   // thunderstorm → WC_STORM
     return 2
   }
@@ -529,6 +564,10 @@ export default function App() {
       const lonVal = typeof loc.lon === 'number' && !isNaN(loc.lon) ? loc.lon : 0
       const r = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${latVal}&lon=${lonVal}&units=metric&appid=${apiKey}`)
       const d = await r.json()
+      if (weatherTestRef.current) {
+        console.log('[Weather] Skipping real weather fetch result because weatherTest is active.')
+        return
+      }
       if (!d.main) {
         throw new Error('No weather data returned')
       }
@@ -593,19 +632,21 @@ export default function App() {
     return []
   }
 
-  // Auto-refresh weather every 2 minutes while in weather mode.
-  // Skips the immediate fetch when a test-weather button was just used so
-  // the real API doesn't overwrite the test data straight away.
+  // Clear test-weather mode whenever we leave the weather screen, so
+  // re-entering weather later pulls real data again.
   useEffect(() => {
-    if (activeMode !== 'weather') return
-    if (suppressWeatherFetchRef.current) {
-      suppressWeatherFetchRef.current = false
-    } else {
-      handleFetchAndPushWeather()
-    }
+    if (activeMode !== 'weather') setWeatherTest(false)
+  }, [activeMode])
+
+  // Auto-refresh weather every 2 minutes while in weather mode.
+  // While previewing a test condition, skip the real API entirely so the
+  // test data stays on the device until the user leaves weather mode.
+  useEffect(() => {
+    if (activeMode !== 'weather' || weatherTest) return
+    handleFetchAndPushWeather()
     const id = setInterval(() => handleFetchAndPushWeather(), 2 * 60 * 1000)
     return () => clearInterval(id)
-  }, [activeMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeMode, weatherTest]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLocationChange = (loc) => {
     setSelectedLocation(loc)
@@ -622,6 +663,7 @@ export default function App() {
     })
 
     // Push updated data to device without switching to weather mode
+    setWeatherTest(false)
     handleFetchAndPushWeather(loc, false)
   }
 
@@ -640,16 +682,18 @@ export default function App() {
       handleWriteSerial('1')
       setActiveMode('animation')
     } else if (mode === 'clock') {
-      // Auto-sync system time on Clock Mode switch
-      const now = new Date()
-      const hh = String(now.getHours()).padStart(2, '0')
-      const mm = String(now.getMinutes()).padStart(2, '0')
-      handleWriteSerial(`2t${hh}${mm}\n`)
+      // Auto-sync system time on Clock Mode switch. Seconds-precise (silent 'T',
+      // not minute-only 't') so the device clock matches real wall-clock — a
+      // minute-only sync truncates to :00 and runs up to ~59s slow, which makes
+      // the displayed minute lag behind a web-timed alarm ring.
+      const epoch = Math.floor(Date.now() / 1000)
+      handleWriteSerial(`2T${epoch}\n`)
       setActiveMode('clock')
     } else if (mode === 'usage') {
       // Refresh usage immediately rather than waiting on the 60s poll
       handleTestUsage()
     } else if (mode === 'weather') {
+      setWeatherTest(false)
       handleFetchAndPushWeather()
     } else {
       handleWriteSerial(cmd)
@@ -733,7 +777,10 @@ export default function App() {
         activeMode={activeMode}
         onClose={() => setActiveMode(null)}
         onWriteSerial={handleWriteSerial}
-        onRefreshWeather={() => handleFetchAndPushWeather(selectedLocation)}
+        onRefreshWeather={() => {
+          setWeatherTest(false)
+          handleFetchAndPushWeather(selectedLocation)
+        }}
         isConnected={isConnected}
         activeAlarm={activeAlarm}
         activeTimer={activeTimer}
@@ -862,12 +909,16 @@ export default function App() {
                         const hh = String(now.getHours()).padStart(2, '0')
                         const mm = String(now.getMinutes()).padStart(2, '0')
                         await handleWriteSerial(`2t${hh}${mm}\n`)
+                        setActiveMode(item.mode)
                       } else if (item.mode === 'usage') {
                         handleTestUsage()
+                      } else if (item.mode === 'weather') {
+                        setWeatherTest(false)
+                        await handleFetchAndPushWeather()
                       } else {
                         await handleWriteSerial(item.cmd)
+                        setActiveMode(item.mode)
                       }
-                      setActiveMode(item.mode)
                     }}
                     className={`px-1 py-1 rounded border text-center transition-all cursor-pointer text-[9px] ${
                       activeMode === item.mode
@@ -883,16 +934,19 @@ export default function App() {
               <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Test Weather</div>
               <div className="flex flex-col gap-1">
                 {[
-                  { label: '☀️ Clear', cmd: 'W0,30,32,80,Ho Chi Minh City,Clear Sky\n' },
-                  { label: '☁️ Cloudy', cmd: 'W3,25,27,85,Ho Chi Minh City,Partly Cloudy\n' },
-                  { label: '🌫️ Fog', cmd: 'W45,20,20,95,Ho Chi Minh City,Foggy\n' },
-                  { label: '🌧️ Rain', cmd: 'W61,22,22,90,Ho Chi Minh City,Light Drizzle\n' },
-                  { label: '⛈️ Storm', cmd: 'W95,18,18,98,Ho Chi Minh City,Thunderstorm\n' }
+                  { label: '☀️ Clear', cmd: 'W0,30,32,80,Ho Chi Minh City,Clear Sky\n', data: { temp: 30, feels: 32, humidity: 80, condition: 'Clear Sky', cityName: 'Ho Chi Minh City' } },
+                  { label: '☁️ Cloudy', cmd: 'W3,25,27,85,Ho Chi Minh City,Partly Cloudy\n', data: { temp: 25, feels: 27, humidity: 85, condition: 'Partly Cloudy', cityName: 'Ho Chi Minh City' } },
+                  { label: '🌫️ Fog', cmd: 'W45,20,20,95,Ho Chi Minh City,Foggy\n', data: { temp: 20, feels: 20, humidity: 95, condition: 'Foggy', cityName: 'Ho Chi Minh City' } },
+                  { label: '🌧️ Rain', cmd: 'W61,22,22,90,Ho Chi Minh City,Light Drizzle\n', data: { temp: 22, feels: 22, humidity: 90, condition: 'Light Drizzle', cityName: 'Ho Chi Minh City' } },
+                  { label: '⛈️ Storm', cmd: 'W95,18,18,98,Ho Chi Minh City,Thunderstorm\n', data: { temp: 18, feels: 18, humidity: 98, condition: 'Thunderstorm', cityName: 'Ho Chi Minh City' } },
+                  { label: '❄️ Snowy', cmd: 'W71,0,-2,90,Ho Chi Minh City,Light Snow\n', data: { temp: 0, feels: -2, humidity: 90, condition: 'Light Snow', cityName: 'Ho Chi Minh City' } },
+                  { label: '💨 Windy', cmd: 'W771,24,22,70,Ho Chi Minh City,Blowing Wind\n', data: { temp: 24, feels: 22, humidity: 70, condition: 'Blowing Wind', cityName: 'Ho Chi Minh City' } }
                 ].map((item, idx) => (
                   <button
                     key={idx}
                     onClick={async () => {
-                      suppressWeatherFetchRef.current = true
+                      setWeatherTest(true)
+                      setWeatherData(item.data)
                       await handleWriteSerial(item.cmd)
                       await handleWriteSerial('6')
                       setActiveMode('weather')

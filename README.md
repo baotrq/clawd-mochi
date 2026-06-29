@@ -90,7 +90,8 @@ Every command is a single character, handled by `handleChar()` so **Serial and t
 **Animation:** `w` normal · `s` squish · `z` logo reveal · `m` toggle dynamic idle cycling
 Expressions: `e` blink · `f` double-blink · `g` look-around · `h` wink · `i` sleepy · `j` surprised · `k` squint · `l` nod · `n` shake · `o` roll · `u` cross-eyed · `v` tilt-confused · `x` excited
 
-**Clock:** `t` set time (`HHMM`) · `r` set alarm (minutes from now)
+**Clock:** `t` set time (`HHMM`) · `r` set alarm (`HHMM`) · `y` set timer (seconds)
+Alarm and timer take an optional name after a space — e.g. `0730 Wake up`, `300 Tea` — shown on the flashing ring screen instead of `ALARM!` / `TIMER!` (no name → default).
 **Pomodoro:** `p` start/stop (runs in background) · `P` set + start (`MMSSB` digits)
 **Terminal:** type freely; `exit` + Enter leaves
 **Sync (sent by the web app, silent):** `T` set clock · `U` push usage stats
@@ -197,7 +198,7 @@ Print files and settings are unchanged from the original — see [`models/`](mod
 - **Inspiration:** the web controller's cozy, ambient feel takes after **[Claude FM](https://claude.fm)**.
 - Support / build photos: [Instagram @clawd.mochi](https://instagram.com/clawd.mochi).
 
-Keep the firmware a single `.ino` file so it stays easy for beginners to flash. PRs welcome.
+The firmware is split across several `.ino` files in `clawd_mochi/` for readability, but the Arduino IDE builds a whole sketch folder as one program — open `clawd_mochi/clawd_mochi.ino`, select your port, and Upload, same as always. PRs welcome.
 
 ## License
 

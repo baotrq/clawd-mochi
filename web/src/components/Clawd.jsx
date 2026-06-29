@@ -320,7 +320,12 @@ export default function Clawd() {
     canvas.addEventListener('click', onClick)
 
     const frame = (now) => {
-      const dt = now - last
+      // Clamp dt: when the tab is backgrounded, requestAnimationFrame pauses and
+      // `now` jumps by the whole away-time on return. Un-clamped, that single
+      // huge dt teleports Clawd far off-screen (s.x += speed * dt) and he only
+      // crawls back slowly — looking "gone" until you refresh. Capping at ~100ms
+      // makes the loop simply resume from where it left off.
+      const dt = Math.min(now - last, 100)
       last = now
       s.t += dt
       const w = canvas.clientWidth

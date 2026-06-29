@@ -14,13 +14,28 @@ There is **no app and no cloud**. The device is controlled two ways:
 
 ```
 clawd_mochi/
-  clawd_mochi.ino          # THE firmware — single file, all logic + embedded web UI
+  clawd_mochi.ino          # entry point — pins, globals, setup(), loop()
+  helpers.ino              # speedMs(), setBacklight(), initColours()
+  logo.ino                 # drawLogoFilled()
+  eyes.ino                 # eye-drawing primitives (normal/squish/wink/droopy/asym)
+  clock_view.ino           # clock screen + its per-loop redraw
+  usage_view.ino           # Claude usage (5h/7d) screen
+  weather_view.ino         # weather screen + animations
+  input_prompt.ino         # numeric input overlay (set-clock/alarm/timer/pomo)
+  pomodoro.ino             # Pomodoro timer logic + screens
+  alarm.ino                # alarm arm/check/ring-flash
+  timer.ino                # countdown timer arm/check/ring-flash
+  terminal.ino             # fake terminal (+ cowsay easter egg)
+  animations.ino           # one-shot anim*() expressions + idle-cycle pool
+  mode_switching.ino       # switchMode() + handleChar() command dispatch
   wifi_bare_test/
     wifi_bare_test.ino     # standalone sketch: minimal SoftAP to debug the flaky radio
 models/                    # 3D-printable STLs (case + display-piece Clawd)
 pics/                      # photos / renders / banner used by README
 README.md                  # end-user build guide (see "Known mismatches" below)
 ```
+
+All `.ino` files above live together in the `clawd_mochi/` sketch folder. The Arduino IDE concatenates every `.ino` file in a sketch folder into one build before compiling, so this still flashes as a single program — it's split across files purely for readability/debugging, not a multi-sketch project. **All pins, globals, enums, structs, and PROGMEM data live in `clawd_mochi.ino`** (which the IDE always compiles first) so every other file can see them regardless of alphabetical order.
 
 There is intentionally **no host-side web/controller app** — a standalone web controller existed earlier and was removed. Do not reintroduce one unless asked; control goes through Serial or the embedded AP page.
 
@@ -41,9 +56,9 @@ Libraries (Library Manager): **Adafruit GFX Library**, **Adafruit ST7735 and ST7
 
 Open `clawd_mochi/clawd_mochi.ino`, select the port, upload. There is no CLI build/test setup; verification is manual on hardware (or via the Serial Monitor — every command also prints there).
 
-## Firmware architecture (`clawd_mochi.ino`)
+## Firmware architecture (`clawd_mochi/` sketch)
 
-Single `.ino`, organized top-to-bottom into commented sections:
+One sketch, split across the `.ino` files listed above (the Arduino IDE builds them as a single program — see the repo layout note):
 
 - **Pins / config** — `TFT_CS=2, TFT_DC=3, TFT_RST=4, TFT_BLK=1`; SPI `SCK=8, MOSI=10`. AP `ClawdMochi` / `mochi1234` → `192.168.4.1`.
 - **State** — a small view state machine: `VIEW_EYES_NORMAL / EYES_SQUISH / CODE (terminal) / CLOCK / INPUT / POMODORO`, plus `animSpeed` (1 slow … 3 fast), `dynamicMode`, `backlightOn`, `busy`.
@@ -74,7 +89,8 @@ Note: the `e`–`x` single-shot expression commands were added in addition to th
 
 ## Conventions & constraints
 
-- **Keep it a single `.ino`.** The README explicitly promises beginners one flat file to flash — do not split into multiple translation units / classes.
+- **Keep it one sketch (the `clawd_mochi/` folder), no classes/translation units.** The code is split across multiple `.ino` files for readability, but the Arduino IDE concatenates them into a single build — there is still only one thing to open and flash (`clawd_mochi.ino`), matching the README's promise of an easy beginner flash. Don't introduce `.h`/`.cpp` files or OOP-style modularization; new code should be a new `.ino` file in the same folder, or added to an existing one.
+- **All globals live in `clawd_mochi.ino`.** It's always compiled first, so every other file can see its pins/enums/structs/state without an include. Don't declare new global state in a non-main file.
 - **Route new commands through `handleChar`**, never duplicate logic in the web route — that's what keeps Serial and WiFi identical.
 - **The embedded `INDEX_HTML` is PROGMEM and size-sensitive** — keep it minimal; it is not the place for a rich UI.
 - **No RTC** — never assume wall-clock time; the clock is a `millis()` stopwatch until set.

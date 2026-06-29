@@ -92,6 +92,9 @@ const EXPRESSIONS = [
   { label: 'Heart Eyes', cmd: 'p', face: '♥  ♥', desc: 'Heart-shaped eyes' },
   { label: 'Dizzy', cmd: 'q', face: '✖  ✖', desc: 'Dizzy cross eyes' },
   { label: 'Glitch', cmd: 'a', face: '▰  ▱', desc: 'Pixelated glitchy eyes' },
+  { label: 'Hypnotized', cmd: 'y', face: '◎  ◎', desc: 'Spinning concentric spiral eyes' },
+  { label: 'Crying', cmd: 'c', face: '〒  〒', desc: 'Sad slanting eyes with static wide blue tears' },
+  { label: 'Neko Cute', cmd: 'd', face: '＾ ＾', desc: 'Anime-style cute blinking cat eyes' },
   { label: 'Anthropic Logo', cmd: 'z', face: ' ⬡ ', desc: 'Draw Anthropic logo line by line' },
 ]
 
@@ -128,12 +131,16 @@ export default function ControlPanel({
 
   const [alarmHourStr, setAlarmHourStr] = useState('')
   const [alarmMinuteStr, setAlarmMinuteStr] = useState('')
+  const [alarmNameStr, setAlarmNameStr] = useState('')
+  const [alarmDays, setAlarmDays] = useState([1, 2, 3, 4, 5]) // Default to weekdays (Mon-Fri)
+  const [editingAlarmIndex, setEditingAlarmIndex] = useState(null)
   const [clockHourStr, setClockHourStr] = useState('')
   const [clockMinuteStr, setClockMinuteStr] = useState('')
   const [terminalInput, setTerminalInput] = useState('')
   const [clockTab, setClockTab] = useState('clock') // 'clock' | 'alarm' | 'timer'
   const [timerMin, setTimerMin] = useState('')
   const [timerSec, setTimerSec] = useState('')
+  const [timerNameStr, setTimerNameStr] = useState('')
   const [pomoFocusStr, setPomoFocusStr] = useState('25')
   const [pomoFocusSecStr, setPomoFocusSecStr] = useState('0')
   const [pomoBreakStr, setPomoBreakStr] = useState('5')
@@ -238,14 +245,26 @@ export default function ControlPanel({
     }
   }, [terminalHistory, activeMode])
 
+  const formatAlarmDays = (days) => {
+    if (!days || days.length === 0) return 'Never'
+    if (days.length === 7) return 'Every day'
+    if (days.length === 5 && !days.includes(0) && !days.includes(6)) return 'Weekdays'
+    if (days.length === 2 && days.includes(0) && days.includes(6)) return 'Weekends'
+    const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    return days.map(d => DAY_NAMES[d]).join(', ')
+  }
+
   if (!activeMode) return null
 
-  // Helper to sync time
+  // Helper to sync time. Seconds-precise (silent 'T', not minute-only 't') so
+  // the device clock matches real wall-clock instead of truncating to :00 and
+  // running up to ~59s slow.
   const handleSyncTime = () => {
     const now = new Date()
     const hh = String(now.getHours()).padStart(2, '0')
     const mm = String(now.getMinutes()).padStart(2, '0')
-    onWriteSerial(`t${hh}${mm}\n`)
+    const ss = String(now.getSeconds()).padStart(2, '0')
+    onWriteSerial(`T${hh}${mm}${ss}\n`)
   }
 
   // Handle manual clock set submission
@@ -563,6 +582,9 @@ export default function ControlPanel({
               {activeAlarm && (
                 <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-2.5 text-emerald-400 text-center font-bold">
                   🔔 Active Alarm: {activeAlarm.targetTime || '08:00'}
+                  {activeAlarm.name && (
+                    <div className="text-[11px] text-ascii-bright/80 font-sans font-normal">{activeAlarm.name}</div>
+                  )}
                   <div className="text-xl font-bold font-mono tracking-widest text-ascii-spark mt-1 animate-pulse">
                     {alarmTimeLeft || 'calculating...'}
                   </div>
@@ -576,14 +598,33 @@ export default function ControlPanel({
                   const mn = (parseInt(alarmMinuteStr, 10) || 0) % 60
                   const hh = String(hr).padStart(2, '0')
                   const mm = String(mn).padStart(2, '0')
-                  onWriteSerial(`r${hh}${mm}\n`)
+                  const nm = alarmNameStr.trim()
+                  
+                  setAlarms(prev => {
+                    const alarmTime = `${hh}:${mm}`
+                    const newAlarm = { time: alarmTime, enabled: true, name: nm, days: alarmDays }
+                    if (editingAlarmIndex !== null) {
+                      return prev.map((a, i) => i === editingAlarmIndex ? newAlarm : a)
+                    } else {
+                      const exists = prev.find(a => a.time === alarmTime)
+                      if (exists) {
+                        return prev.map(a => a.time === alarmTime ? { ...a, enabled: true, name: nm || a.name, days: alarmDays } : a)
+                      } else {
+                        return [...prev, newAlarm]
+                      }
+                    }
+                  })
+
                   setAlarmHourStr('')
                   setAlarmMinuteStr('')
+                  setAlarmNameStr('')
+                  setAlarmDays([1, 2, 3, 4, 5]) // Reset to weekdays default
+                  setEditingAlarmIndex(null)
                 }}
                 className="space-y-2"
               >
                 <div className="text-[10px] text-ascii-mid uppercase font-bold tracking-wider">
-                  Add Alarm Time
+                  {editingAlarmIndex !== null ? 'Edit Alarm Time' : 'Add Alarm Time'}
                 </div>
                 <div className="flex gap-2 items-center">
                   <input
@@ -605,12 +646,66 @@ export default function ControlPanel({
                     onChange={(e) => setAlarmMinuteStr(e.target.value)}
                     className="w-full bg-room-bg-deep border border-ascii-mid/30 focus:border-ascii-bright/60 rounded px-2.5 py-1.5 text-ascii-spark outline-none font-mono"
                   />
-                  <button
-                    type="submit"
-                    className="bg-ascii-bright/10 hover:bg-ascii-bright/25 border border-ascii-mid/30 text-ascii-spark px-3 py-1 rounded cursor-pointer font-bold"
-                  >
-                    Add
-                  </button>
+                  <div className="flex gap-1">
+                    <button
+                      type="submit"
+                      className="bg-ascii-bright/10 hover:bg-ascii-bright/25 border border-ascii-mid/30 text-ascii-spark px-3 py-1 rounded cursor-pointer font-bold"
+                    >
+                      {editingAlarmIndex !== null ? 'Save' : 'Add'}
+                    </button>
+                    {editingAlarmIndex !== null && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAlarmHourStr('')
+                          setAlarmMinuteStr('')
+                          setAlarmNameStr('')
+                          setAlarmDays([1, 2, 3, 4, 5])
+                          setEditingAlarmIndex(null)
+                        }}
+                        className="bg-ascii-dim/10 hover:bg-ascii-bright/15 border border-ascii-mid/30 text-ascii-mid px-2 py-1 rounded cursor-pointer"
+                        title="Cancel editing"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                <input
+                  type="text"
+                  maxLength={18}
+                  placeholder="Name (optional) — shown when it rings"
+                  value={alarmNameStr}
+                  onChange={(e) => setAlarmNameStr(e.target.value)}
+                  className="w-full bg-room-bg-deep border border-ascii-mid/30 focus:border-ascii-bright/60 rounded px-2.5 py-1.5 text-ascii-spark outline-none font-mono"
+                />
+
+                {/* Weekday Selection Buttons */}
+                <div className="flex gap-1 justify-between my-2">
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dayName, idx) => {
+                    const isSelected = alarmDays.includes(idx)
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setAlarmDays(prev => 
+                            prev.includes(idx) 
+                              ? prev.filter(d => d !== idx) 
+                              : [...prev, idx].sort()
+                          )
+                        }}
+                        className={`w-7 h-7 rounded-full text-[10px] font-bold transition-all flex items-center justify-center cursor-pointer border ${
+                          isSelected 
+                            ? 'bg-[#d97756]/20 border-[#d97756]/60 text-[#f0b89a] font-bold' 
+                            : 'border-ascii-mid/20 text-ascii-mid hover:border-ascii-bright/35 hover:bg-ascii-bright/5'
+                        }`}
+                      >
+                        {dayName}
+                      </button>
+                    )
+                  })}
                 </div>
               </form>
 
@@ -625,10 +720,33 @@ export default function ControlPanel({
                   <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 scrollbar-none">
                     {alarms.map((alarm, idx) => (
                       <div key={idx} className="flex justify-between items-center bg-ascii-dim/5 border border-ascii-mid/10 rounded-lg p-2 text-[11px]">
-                        <span className="font-bold text-ascii-spark font-mono">
-                          🔔 {alarm.time}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-bold text-ascii-spark font-mono">
+                            🔔 {alarm.time}
+                            {alarm.name && (
+                              <span className="ml-1.5 text-ascii-bright/80 font-sans font-normal not-italic">— {alarm.name}</span>
+                            )}
+                          </span>
+                          <span className="text-[9px] text-ascii-mid font-mono font-medium">
+                            {formatAlarmDays(alarm.days)}
+                          </span>
+                        </div>
                         <div className="flex gap-2 items-center">
+                          {/* Edit button */}
+                          <button
+                            onClick={() => {
+                              const [hh, mm] = alarm.time.split(':')
+                              setAlarmHourStr(hh)
+                              setAlarmMinuteStr(mm)
+                              setAlarmNameStr(alarm.name || '')
+                              setAlarmDays(alarm.days || [0, 1, 2, 3, 4, 5, 6])
+                              setEditingAlarmIndex(idx)
+                            }}
+                            className="text-ascii-mid hover:text-ascii-spark cursor-pointer font-sans text-xs"
+                            title="Edit alarm"
+                          >
+                            ✏️
+                          </button>
                           {/* Toggle switch */}
                           <button
                             onClick={() => {
@@ -699,6 +817,9 @@ export default function ControlPanel({
               {activeTimer && (
                 <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-2.5 text-emerald-400 text-center font-bold">
                   ⏱️ Countdown Active
+                  {activeTimer.name && (
+                    <div className="text-[11px] text-ascii-bright/80 font-sans font-normal">{activeTimer.name}</div>
+                  )}
                   <div className="text-xl font-bold font-mono tracking-widest text-ascii-spark mt-1 animate-pulse">
                     {timerTimeLeft || '0:00'}
                   </div>
@@ -710,9 +831,11 @@ export default function ControlPanel({
                   e.preventDefault()
                   const totalSecs = (parseInt(timerMin, 10) || 0) * 60 + (parseInt(timerSec, 10) || 0)
                   if (totalSecs > 0) {
-                    onWriteSerial(`y${totalSecs}\n`)
+                    const nm = timerNameStr.trim()
+                    onWriteSerial(`y${totalSecs}${nm ? ' ' + nm : ''}\n`)
                     setTimerMin('')
                     setTimerSec('')
+                    setTimerNameStr('')
                   } else {
                     alert('Please enter a duration larger than 0')
                   }
@@ -748,6 +871,14 @@ export default function ControlPanel({
                     Start
                   </button>
                 </div>
+                <input
+                  type="text"
+                  maxLength={18}
+                  placeholder="Name (optional) — shown when it rings"
+                  value={timerNameStr}
+                  onChange={(e) => setTimerNameStr(e.target.value)}
+                  className="w-full bg-room-bg-deep border border-ascii-mid/30 focus:border-ascii-bright/60 rounded px-2 py-1 text-ascii-spark outline-none font-mono"
+                />
               </form>
 
               {/* Timer presets */}
@@ -993,7 +1124,7 @@ export default function ControlPanel({
           </div>
 
           <div className="text-[10px] text-ascii-mid leading-relaxed text-center italic">
-            This mode displays live temperature, feels-like temperature, humidity, and retro weather animations (clear, cloudy, fog, rain, storm) on the device.
+            This mode displays live temperature, feels-like temperature, humidity, and retro weather animations (clear, cloudy, fog, rain, storm, snowy, windy) on the device.
           </div>
         </div>
       )}
