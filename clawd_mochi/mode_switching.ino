@@ -138,7 +138,7 @@ void handleChar(char c) {
       int comma2 = wxBuf.indexOf(',', comma1 + 1);
       int comma3 = wxBuf.indexOf(',', comma2 + 1);
       if (comma1 != -1 && comma2 != -1 && comma3 != -1) {
-        uint8_t wmo = wxBuf.substring(0, comma1).toInt();
+        uint16_t wmo = wxBuf.substring(0, comma1).toInt();
         int8_t temp = wxBuf.substring(comma1 + 1, comma2).toInt();
         int8_t feels = wxBuf.substring(comma2 + 1, comma3).toInt();
         int comma4 = wxBuf.indexOf(',', comma3 + 1);

@@ -6,7 +6,7 @@
 //  WEATHER VIEW
 // ═════════════════════════════════════════════════════════════
 
-WeatherCondition wmoToCondition(uint8_t wmo) {
+WeatherCondition wmoToCondition(uint16_t wmo) {
   if (wmo <= 1) return WC_CLEAR;
   if (wmo == 45 || wmo == 48) return WC_FOG;
   if ((wmo >= 71 && wmo <= 77) || wmo == 85 || wmo == 86) return WC_SNOWY;
