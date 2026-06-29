@@ -306,52 +306,82 @@ void updateRainAnimation(uint8_t speed, uint16_t skyCol, uint16_t dropCol) {
   }
 }
 
+void fillSnowflake(int16_t x, int16_t y, uint16_t col) {
+  if (x >= 0 && x < 60 && y >= 0 && y < 30) {
+    int16_t cx = x * PX;
+    int16_t cy = y * PX;
+    tft.fillRect(cx + 1, cy + 1, 2, 2, col);
+    tft.drawPixel(cx + 1, cy, col);
+    tft.drawPixel(cx + 2, cy, col);
+    tft.drawPixel(cx + 1, cy + 3, col);
+    tft.drawPixel(cx + 2, cy + 3, col);
+    tft.drawPixel(cx, cy + 1, col);
+    tft.drawPixel(cx, cy + 2, col);
+    tft.drawPixel(cx + 3, cy + 1, col);
+    tft.drawPixel(cx + 3, cy + 2, col);
+  }
+}
+
 void updateSnowAnimation(uint16_t skyCol, uint16_t snowCol) {
   for (uint8_t i = 0; i < 20; i++) {
-    // 1. Erase old snowflake
-    int8_t lastSway = (int8_t)(sin((wxFrame - 1 + i * 12) * 0.2) * 2.5);
-    int8_t lastY = (wxFrame % 2 == 0) ? drops[i].y - 1 : drops[i].y;
-    fillPx(drops[i].x + lastSway, lastY, skyCol);
+    // 1. Erase at the exact previous position (where it was left in the previous frame)
+    int8_t prevSway = (int8_t)(sin((wxFrame - 1 + i * 12) * 0.15) * 3.0);
+    fillPx(drops[i].x + prevSway, drops[i].y, skyCol);
     
-    // 2. Advance snowflake
+    // 2. Advance y-position (slow fall)
     if (wxFrame % 2 == 0) {
       drops[i].y += 1;
     }
     
-    // Wrap if off bottom
-    if (drops[i].y >= 30) {
+    // Wrap if it hits the ground (y=29 is the ground)
+    if (drops[i].y >= 29) {
       drops[i].y = -1;
-      drops[i].x = random(-2, 62);
+      drops[i].x = random(-3, 63);
     }
     
-    // 3. Draw new snowflake
-    int8_t currentSway = (int8_t)(sin((wxFrame + i * 12) * 0.2) * 2.5);
-    fillPx(drops[i].x + currentSway, drops[i].y, snowCol);
+    // 3. Draw at the new position (using current frame's sway)
+    int8_t currSway = (int8_t)(sin((wxFrame + i * 12) * 0.15) * 3.0);
+    fillSnowflake(drops[i].x + currSway, drops[i].y, snowCol);
   }
 }
 
-void updateWindAnimation(uint16_t skyCol, uint16_t windCol) {
+void updateWindAnimation(uint16_t skyCol) {
+  // Vibrant blue breeze gradient
+  uint16_t c1 = tft.color565(100, 220, 255); // bright cyan-blue lead
+  uint16_t c2 = tft.color565(60, 160, 255);  // medium blue body
+  uint16_t c3 = tft.color565(30, 110, 220);  // dark blue tail
+  
   // Use drops[0..5] for wind lines
   for (uint8_t i = 0; i < 6; i++) {
-    // 1. Erase old wind line (4 pixels long)
-    for (int8_t dx = 0; dx < 4; dx++) {
-      fillPx(drops[i].x - dx, drops[i].y, skyCol);
+    // 1. Erase old wavy wind line (length 6)
+    int8_t prevX = drops[i].x - 3;
+    for (int8_t dx = 0; dx < 6; dx++) {
+      int8_t px = prevX - dx;
+      int8_t py = drops[i].y + (int8_t)(sin(px * 0.25) * 1.8);
+      fillPx(px, py, skyCol);
     }
     
     // 2. Advance wind particle
     drops[i].x += 3;
     
     // Wrap if off right edge
-    if (drops[i].x >= 64) {
-      drops[i].x = -4;
-      drops[i].y = random(2, 24);
+    if (drops[i].x >= 70) {
+      drops[i].x = -6;
+      drops[i].y = random(3, 23);
     }
     
-    // 3. Draw new wind line (4 pixels long, fading)
-    fillPx(drops[i].x, drops[i].y, windCol);
-    fillPx(drops[i].x - 1, drops[i].y, windCol);
-    fillPx(drops[i].x - 2, drops[i].y, tft.color565(180, 200, 220));
-    fillPx(drops[i].x - 3, drops[i].y, tft.color565(140, 160, 180));
+    // 3. Draw new wavy wind line
+    for (int8_t dx = 0; dx < 6; dx++) {
+      int8_t px = drops[i].x - dx;
+      int8_t py = drops[i].y + (int8_t)(sin(px * 0.25) * 1.8);
+      
+      uint16_t col;
+      if (dx < 2)       col = c1;
+      else if (dx < 4)  col = c2;
+      else              col = c3;
+      
+      fillPx(px, py, col);
+    }
   }
 
   // Use drops[6..14] for blowing leaves
@@ -637,7 +667,7 @@ void updateWeatherView() {
     fillPx(7 + sway, 26, leafCol);
     
     // Animate wind lines and leaves
-    updateWindAnimation(skyCol, tft.color565(220, 230, 240));
+    updateWindAnimation(skyCol);
   }
 }
 
