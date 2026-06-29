@@ -120,12 +120,18 @@ void initWeatherAnimation() {
   planeY = 12;
   claudeX = 20;
   claudeDir = 1;
+  windPersonX = 50;
   
   if (wx.hasData) {
     if (wx.cond == WC_RAIN || wx.cond == WC_STORM || wx.cond == WC_SNOWY || wx.cond == WC_WINDY) {
       for (uint8_t i = 0; i < 30; i++) {
         drops[i].x = random(0, 60);
         drops[i].y = (wx.cond == WC_WINDY) ? random(2, 26) : random(-10, 30);
+      }
+      if (wx.cond == WC_WINDY) {
+        cloudX[0] = 5;
+        cloudX[1] = 35;
+        planeY = 6; // Set plane to fly higher in Windy mode
       }
     } else if (wx.cond == WC_CLOUDY) {
       cloudX[0] = 5;
@@ -172,9 +178,9 @@ void drawWeatherView() {
         accentCol = tft.color565(245, 245, 255);
         break;
       case WC_WINDY:
-        skyCol = tft.color565(115, 135, 155);
+        skyCol = tft.color565(120, 180, 220);
         condStr = "WINDY";
-        accentCol = tft.color565(180, 210, 230);
+        accentCol = tft.color565(100, 220, 255);
         break;
     }
   } else {
@@ -383,32 +389,42 @@ void updateWindAnimation(uint16_t skyCol) {
       fillPx(px, py, col);
     }
   }
+}
 
-  // Use drops[6..14] for blowing leaves
-  uint16_t leafColors[] = { tft.color565(34, 139, 34), tft.color565(218, 165, 32), tft.color565(139, 69, 19) };
-  for (uint8_t i = 6; i < 15; i++) {
-    // 1. Erase old leaf
-    fillPx(drops[i].x, drops[i].y, skyCol);
-    fillPx(drops[i].x - 1, drops[i].y + 1, skyCol);
-    
-    // 2. Advance leaf
-    drops[i].x += 2;
-    if (wxFrame % 2 == 0) {
-      drops[i].y += (random(3) - 1);
-    }
-    
-    // Wrap if off screen
-    if (drops[i].x >= 62 || drops[i].y >= 28 || drops[i].y < 1) {
-      drops[i].x = -2;
-      drops[i].y = random(2, 22);
-    }
-    
-    // 3. Draw leaf
-    uint16_t leafCol = leafColors[i % 3];
-    fillPx(drops[i].x, drops[i].y, leafCol);
-    fillPx(drops[i].x - 1, drops[i].y + (wxFrame % 4 < 2 ? 1 : 0), leafCol);
+void drawPerson(int8_t px, int8_t py, int8_t frame, uint16_t bodyCol) {
+  // Head:
+  fillPx(px + 2, py, bodyCol);
+  fillPx(px + 3, py, bodyCol);
+  fillPx(px + 2, py + 1, bodyCol);
+  fillPx(px + 3, py + 1, bodyCol);
+  
+  // Torso (leaning left into the wind):
+  fillPx(px + 1, py + 2, bodyCol);
+  fillPx(px + 2, py + 2, bodyCol);
+  fillPx(px + 1, py + 3, bodyCol);
+  fillPx(px + 2, py + 3, bodyCol);
+  
+  // Scarf blowing to the right (wind direction):
+  uint16_t scarfCol = tft.color565(255, 60, 60); // bright red scarf
+  fillPx(px + 3, py + 2, scarfCol);
+  if (frame == 0) {
+    fillPx(px + 4, py + 2, scarfCol);
+    fillPx(px + 5, py + 1, scarfCol);
+  } else {
+    fillPx(px + 4, py + 3, scarfCol);
+    fillPx(px + 5, py + 3, scarfCol);
+  }
+
+  // Legs:
+  if (frame == 0) {
+    fillPx(px + 1, py + 4, bodyCol);
+    fillPx(px + 3, py + 4, bodyCol);
+  } else {
+    fillPx(px + 2, py + 4, bodyCol);
+    fillPx(px + 2, py + 5, bodyCol);
   }
 }
+
 
 void updateWeatherView() {
   if (millis() - wxLastFrame < 100) return;
@@ -425,7 +441,7 @@ void updateWeatherView() {
     case WC_RAIN:   skyCol = tft.color565(20, 30, 55);    break;
     case WC_STORM:  skyCol = tft.color565(10, 15, 25);    break;
     case WC_SNOWY:  skyCol = tft.color565(140, 165, 185); break;
-    case WC_WINDY:  skyCol = tft.color565(115, 135, 155); break;
+    case WC_WINDY:  skyCol = tft.color565(120, 180, 220); break;
   }
   
   if (wx.cond == WC_RAIN) {
@@ -639,35 +655,78 @@ void updateWeatherView() {
     updateSnowAnimation(skyCol, C_WHITE);
   }
   else if (wx.cond == WC_WINDY) {
-    // Swaying tree on the left (x=6)
-    uint16_t trunkCol = tft.color565(139, 69, 19);
-    uint16_t leafCol = tft.color565(34, 139, 34);
+    // 1. Erase old plane
+    if (planeX >= -4 && planeX < 65) {
+      fillPx(planeX, planeY, skyCol);
+      fillPx(planeX - 1, planeY, skyCol);
+      fillPx(planeX - 2, planeY, skyCol);
+      fillPx(planeX - 3, planeY, skyCol);
+      fillPx(planeX - 1, planeY - 1, skyCol);
+      fillPx(planeX - 1, planeY + 1, skyCol);
+      fillPx(planeX - 3, planeY - 1, skyCol);
+    }
     
-    int8_t sway = (wxFrame % 8 < 4) ? 1 : 2;
+    // Erase old person (size 6x6 at y=23)
+    for (int8_t r = 0; r < 6; r++) {
+      for (int8_t c = 0; c < 6; c++) {
+        fillPx(windPersonX + c, 23 + r, skyCol);
+      }
+    }
     
-    // Erase tree
-    tft.fillRect(3 * PX, 22 * PX, 10 * PX, 7 * PX, skyCol);
+    // Erase old clouds
+    drawCloud(cloudX[0], 2, CLOUD_MASK_1, skyCol);
+    drawCloud(cloudX[1], 8, CLOUD_MASK_2, skyCol);
     
-    // Draw trunk
-    fillPx(6, 27, trunkCol);
-    fillPx(6, 28, trunkCol);
+    // 2. Update positions
+    if (wxFrame % 3 == 0) {
+      windPersonX--;
+      if (windPersonX < -6) {
+        windPersonX = 60;
+      }
+    }
     
-    // Draw leaves leaning
-    fillPx(6 + sway, 23, leafCol);
-    fillPx(5 + sway, 24, leafCol);
-    fillPx(6 + sway, 24, leafCol);
-    fillPx(7 + sway, 24, leafCol);
-    fillPx(4 + sway, 25, leafCol);
-    fillPx(5 + sway, 25, leafCol);
-    fillPx(6 + sway, 25, leafCol);
-    fillPx(7 + sway, 25, leafCol);
-    fillPx(8 + sway, 25, leafCol);
-    fillPx(5 + sway, 26, leafCol);
-    fillPx(6 + sway, 26, leafCol);
-    fillPx(7 + sway, 26, leafCol);
+    if (wxFrame % 2 == 0) {
+      planeX++;
+      if (planeX >= 80) {
+        planeX = -80;
+        planeY = random(3, 10);
+      }
+    }
     
-    // Animate wind lines and leaves
+    if (wxFrame % 3 == 0) {
+      cloudX[0]++;
+      cloudX[1]++;
+      if (cloudX[0] >= 65) cloudX[0] = -14;
+      if (cloudX[1] >= 65) cloudX[1] = -14;
+    }
+    
+    // 3. Draw clouds
+    drawCloud(cloudX[0], 2, CLOUD_MASK_1, C_WHITE);
+    drawCloud(cloudX[1], 8, CLOUD_MASK_2, C_WHITE);
+    
+    // 4. Draw wind lines
     updateWindAnimation(skyCol);
+    
+    // 5. Draw plane (bobbing in wind)
+    int8_t planeBob = (wxFrame % 4 < 2) ? 0 : 1;
+    int8_t currPlaneY = planeY + planeBob;
+    if (planeX >= 0 && planeX < 60) {
+      uint16_t planeCol = tft.color565(180, 180, 180);
+      fillPx(planeX, currPlaneY, planeCol);
+      fillPx(planeX - 1, currPlaneY, planeCol);
+      fillPx(planeX - 2, currPlaneY, planeCol);
+      fillPx(planeX - 3, currPlaneY, planeCol);
+      fillPx(planeX - 1, currPlaneY - 1, planeCol);
+      fillPx(planeX - 1, currPlaneY + 1, planeCol);
+      fillPx(planeX - 3, currPlaneY - 1, planeCol);
+    }
+    
+    // 6. Draw person
+    int8_t personFrame = (windPersonX % 2 == 0) ? 0 : 1;
+    drawPerson(windPersonX, 23, personFrame, tft.color565(50, 50, 50));
+    
+    // 7. Redraw grass/ground line
+    tft.fillRect(0, 29 * PX, DISP_W, PX, tft.color565(34, 139, 34)); // draw grass
   }
 }
 

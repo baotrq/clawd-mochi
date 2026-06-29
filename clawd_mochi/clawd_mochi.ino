@@ -260,6 +260,7 @@ int16_t  planeX = -40;
 int8_t   planeY = 12;
 int16_t  claudeX = 20;
 int8_t   claudeDir = 1;
+int16_t  windPersonX = 50;
 
 // Sprites
 const uint16_t SUN_MASK[16] PROGMEM = {
