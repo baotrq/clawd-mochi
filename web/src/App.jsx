@@ -150,6 +150,7 @@ export default function App() {
   const [volume, setVolume] = useState(0.5)
   const [streamIdx, setStreamIdx] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
+  const [settingsTab, setSettingsTab] = useState('sys')
   const audioRef = useRef(null)
 
   // Manage Audio element lifecycle
@@ -776,47 +777,19 @@ export default function App() {
               {isPlaying ? '⏸' : '▶'}
             </button>
 
-            {/* Mute/Volume Button & Slider */}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setIsMuted(!isMuted)}
-                className="text-ascii-mid hover:text-ascii-spark text-xs transition-colors cursor-pointer active:scale-95"
-                title={isMuted ? 'Unmute' : 'Mute'}
-              >
-                {isMuted || volume === 0 ? '🔇' : '🔊'}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => {
-                  setVolume(parseFloat(e.target.value))
-                  setIsMuted(false)
-                }}
-                className="w-10 h-1 bg-ascii-mid/20 rounded-lg appearance-none cursor-pointer accent-[#e05f3e] outline-none"
-              />
-            </div>
-
-            {/* Stream Selector */}
-            <select
-              value={streamIdx}
-              onChange={(e) => setStreamIdx(parseInt(e.target.value, 10))}
-              className="bg-room-bg-deep border border-ascii-mid/25 rounded px-1 py-0.5 text-ascii-spark font-mono text-[9px] outline-none cursor-pointer max-w-[90px] focus:border-ascii-spark"
+            {/* Clickable Marquee for cycling streams */}
+            <button
+              onClick={() => setStreamIdx(prev => (prev + 1) % STREAMS.length)}
+              className="w-[100px] overflow-hidden whitespace-nowrap relative flex items-center text-left cursor-pointer hover:opacity-80 active:scale-95 font-mono text-[10px]"
+              title="Click to cycle lofi streams"
             >
-              {STREAMS.map((s, i) => (
-                <option key={i} value={i} className="bg-room-bg-deep text-ascii-spark">{s.name}</option>
-              ))}
-            </select>
-
-            {/* Marquee status */}
-            <div className="w-[70px] overflow-hidden whitespace-nowrap relative flex items-center">
               <div className={`inline-block ${isPlaying ? 'animate-marquee' : ''}`}>
+                <span className="text-[#e05f3e] mr-1.5 font-bold animate-pulse">♫</span>
                 <span className="text-ascii-spark mr-8">{STREAMS[streamIdx].name}</span>
+                <span className="text-[#e05f3e] mr-1.5 font-bold animate-pulse">♫</span>
                 <span className="text-ascii-spark mr-8">{STREAMS[streamIdx].name}</span>
               </div>
-            </div>
+            </button>
           </div>
 
           {/* Status Prompt */}
@@ -918,138 +891,210 @@ export default function App() {
         {/* Right side: configuration control popover */}
         <div className="flex items-center gap-2 pointer-events-auto relative config-menu-container">
           {showConfigMenu && (
-            <div className="absolute bottom-10 right-0 z-30 w-48 bg-room-bg/95 border border-ascii-mid/20 rounded-lg p-2 font-mono text-[10px] text-ascii-bright/80 backdrop-blur shadow-xl flex flex-col gap-1.5 max-h-[320px] overflow-y-auto">
-              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pb-1">System Controls</div>
-              
-              <button
-                onClick={() => {
-                  setCalibrateMode(!calibrateMode)
-                  setShowConfigMenu(false)
-                }}
-                className={`w-full text-left px-2 py-1.2 rounded transition-all cursor-pointer flex items-center justify-between ${
-                  calibrateMode
-                    ? 'bg-orange-950/10 text-orange-400/80 font-bold border border-orange-900/20'
-                    : 'hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70'
-                }`}
-              >
-                <span>🎯 Calibrate</span>
-                {calibrateMode && <span>✓</span>}
-              </button>
+            <div className="absolute bottom-10 right-0 z-30 w-64 bg-room-bg/95 border border-ascii-mid/20 rounded-lg p-3 font-mono text-[10px] text-ascii-bright/80 backdrop-blur shadow-xl flex flex-col gap-1.5 max-h-[350px] overflow-y-auto">
+              {/* Tab Bar */}
+              <div className="flex border-b border-ascii-mid/20 text-[9px] mb-2 font-bold uppercase select-none">
+                {[
+                  { id: 'sys', label: '⚙️ Sys' },
+                  { id: 'audio', label: '🔊 Audio' },
+                  { id: 'test', label: '🧪 Test' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSettingsTab(tab.id)}
+                    className={`flex-1 text-center py-1 cursor-pointer transition-all border-b-2 ${
+                      settingsTab === tab.id
+                        ? 'border-[#e05f3e] text-[#f0b89a] font-bold'
+                        : 'border-transparent text-ascii-mid hover:text-ascii-bright'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-              {calibrateMode && (
-                <button
-                  onClick={() => {
-                    handleResetHotspots()
-                    setShowConfigMenu(false)
-                  }}
-                  className="w-full text-left px-2 py-1.2 rounded text-red-400/80 hover:bg-red-950/10 transition-all cursor-pointer border border-transparent hover:border-red-900/20"
-                >
-                  🗑️ Reset
-                </button>
+              {/* Tab Content */}
+              {settingsTab === 'sys' && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pb-1">Mascots & Hotspots</div>
+                  
+                  <button
+                    onClick={() => {
+                      setCalibrateMode(!calibrateMode)
+                      setShowConfigMenu(false)
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded transition-all cursor-pointer flex items-center justify-between border ${
+                      calibrateMode
+                        ? 'bg-orange-950/10 border-orange-900/40 text-orange-400 font-bold'
+                        : 'bg-ascii-bright/5 border-ascii-mid/15 hover:border-ascii-spark hover:text-ascii-spark text-ascii-bright/80'
+                    }`}
+                  >
+                    <span>🎯 Calibrate</span>
+                    {calibrateMode && <span>✓</span>}
+                  </button>
+
+                  {calibrateMode && (
+                    <button
+                      onClick={() => {
+                        handleResetHotspots()
+                        setShowConfigMenu(false)
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded text-red-400 bg-red-950/10 border border-red-900/35 hover:bg-red-950/25 transition-all cursor-pointer"
+                    >
+                      🗑️ Reset Hotspots
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      const url = new URL(window.location.href)
+                      url.searchParams.set('tune', '1')
+                      window.location.href = url.toString()
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded bg-ascii-bright/5 border border-ascii-mid/15 hover:border-ascii-spark hover:text-ascii-spark text-ascii-bright/80 transition-all cursor-pointer"
+                  >
+                    🎨 Tune Mascot
+                  </button>
+
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Display settings</div>
+                  
+                  <button
+                    onClick={() => handleWriteSerial('b')}
+                    className="w-full text-left px-2 py-1.5 rounded bg-ascii-bright/5 border border-ascii-mid/15 hover:border-ascii-spark hover:text-ascii-spark text-ascii-bright/80 transition-all cursor-pointer"
+                  >
+                    💡 Toggle Backlight
+                  </button>
+
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Idle Face Switch (seconds)</div>
+                  <div className="grid grid-cols-3 gap-1 px-1">
+                    {[3, 5, 8, 15, 30, 60].map(s => (
+                      <button
+                        key={s}
+                        onClick={() => { handleWriteSerial(`I${s}\n`); setIdleIntervalSec(s) }}
+                        className={`py-1 rounded text-[9px] font-mono font-bold cursor-pointer transition-all border ${
+                          idleIntervalSec === s
+                            ? 'bg-[#d97756]/20 border-[#d97756]/60 text-[#f0b89a]'
+                            : 'bg-ascii-dim/10 border-ascii-mid/20 text-ascii-mid hover:border-ascii-mid/40 hover:text-ascii-bright'
+                        }`}
+                      >
+                        {s}s
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
 
-              <button
-                onClick={() => {
-                  const url = new URL(window.location.href)
-                  url.searchParams.set('tune', '1')
-                  window.location.href = url.toString()
-                }}
-                className="w-full text-left px-2 py-1.2 rounded hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70 transition-all cursor-pointer"
-              >
-                🎨 Tune Mascot
-              </button>
+              {settingsTab === 'audio' && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pb-1">Lofi Volume</div>
+                  <div className="flex flex-col gap-3 p-2 bg-ascii-bright/5 rounded border border-ascii-mid/10">
+                    <div className="flex items-center justify-between">
+                      <span className="text-ascii-mid text-[9px]">Mute Audio</span>
+                      <button
+                        onClick={() => setIsMuted(!isMuted)}
+                        className={`px-2 py-0.5 rounded text-[9px] font-mono cursor-pointer transition-all border ${
+                          isMuted
+                            ? 'bg-red-950/20 border-red-900/30 text-red-400 font-bold'
+                            : 'bg-ascii-dim/10 border-ascii-mid/20 text-ascii-mid hover:border-ascii-mid/40 hover:text-ascii-bright'
+                        }`}
+                      >
+                        {isMuted ? 'Muted' : 'Active'}
+                      </button>
+                    </div>
+                    
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between text-ascii-mid text-[9px]">
+                        <span>Volume Level</span>
+                        <span className="text-ascii-spark font-bold font-mono">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={isMuted ? 0 : volume}
+                        onChange={(e) => {
+                          setVolume(parseFloat(e.target.value))
+                          setIsMuted(false)
+                        }}
+                        className="w-full h-1.5 bg-ascii-mid/20 rounded-lg appearance-none cursor-pointer accent-[#e05f3e] outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
-              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Screen</div>
-              <button
-                onClick={() => handleWriteSerial('b')}
-                className="w-full text-left px-2 py-1.2 rounded hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70 transition-all cursor-pointer"
-              >
-                💡 Toggle Backlight
-              </button>
-              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Idle Face Switch — every ~{idleIntervalSec}s</div>
-              <div className="grid grid-cols-4 gap-1 px-1">
-                {[3, 5, 8, 15, 30, 60].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => { handleWriteSerial(`I${s}\n`); setIdleIntervalSec(s) }}
-                    className={`py-1 rounded text-[9px] font-mono font-bold cursor-pointer transition-all border ${
-                      idleIntervalSec === s
-                        ? 'bg-[#d97756]/20 border-[#d97756]/60 text-[#f0b89a]'
-                        : 'bg-ascii-dim/10 border-ascii-mid/20 text-ascii-mid hover:border-ascii-mid/40 hover:text-ascii-bright'
-                    }`}
-                  >
-                    {s}s
-                  </button>
-                ))}
-              </div>
+              {settingsTab === 'test' && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pb-1">Firmware Screens</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { label: 'Expr', cmd: '1', mode: 'animation' },
+                      { label: 'Clock', cmd: '2', mode: 'clock' },
+                      { label: 'Pomo', cmd: '3', mode: 'pomodoro' },
+                      { label: 'Term', cmd: '4', mode: 'terminal' },
+                      { label: 'Usage', cmd: '5', mode: 'usage' },
+                      { label: 'Wx', cmd: '6', mode: 'weather' }
+                    ].map((item) => (
+                      <button
+                        key={item.cmd}
+                        onClick={async () => {
+                          if (item.mode === 'clock') {
+                            const now = new Date()
+                            const hh = String(now.getHours()).padStart(2, '0')
+                            const mm = String(now.getMinutes()).padStart(2, '0')
+                            await handleWriteSerial(`2t${hh}${mm}\n`)
+                            setActiveMode(item.mode)
+                          } else if (item.mode === 'usage') {
+                            handleTestUsage()
+                          } else if (item.mode === 'weather') {
+                            setWeatherTest(false)
+                            await handleFetchAndPushWeather()
+                          } else {
+                            await handleWriteSerial(item.cmd)
+                            setActiveMode(item.mode)
+                          }
+                        }}
+                        className={`px-1 py-1 rounded border text-center transition-all cursor-pointer text-[9px] ${
+                          activeMode === item.mode
+                            ? 'bg-ascii-spark/10 border-ascii-spark text-ascii-spark font-bold'
+                            : 'bg-ascii-bright/5 border-ascii-mid/10 hover:border-ascii-spark hover:text-ascii-spark'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
 
-              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Test Modes</div>
-              <div className="grid grid-cols-3 gap-1">
-                {[
-                  { label: 'Expr', cmd: '1', mode: 'animation' },
-                  { label: 'Clock', cmd: '2', mode: 'clock' },
-                  { label: 'Pomo', cmd: '3', mode: 'pomodoro' },
-                  { label: 'Term', cmd: '4', mode: 'terminal' },
-                  { label: 'Usage', cmd: '5', mode: 'usage' },
-                  { label: 'Wx', cmd: '6', mode: 'weather' }
-                ].map((item) => (
-                  <button
-                    key={item.cmd}
-                    onClick={async () => {
-                      if (item.mode === 'clock') {
-                        const now = new Date()
-                        const hh = String(now.getHours()).padStart(2, '0')
-                        const mm = String(now.getMinutes()).padStart(2, '0')
-                        await handleWriteSerial(`2t${hh}${mm}\n`)
-                        setActiveMode(item.mode)
-                      } else if (item.mode === 'usage') {
-                        handleTestUsage()
-                      } else if (item.mode === 'weather') {
-                        setWeatherTest(false)
-                        await handleFetchAndPushWeather()
-                      } else {
-                        await handleWriteSerial(item.cmd)
-                        setActiveMode(item.mode)
-                      }
-                    }}
-                    className={`px-1 py-1 rounded border text-center transition-all cursor-pointer text-[9px] ${
-                      activeMode === item.mode
-                        ? 'bg-ascii-spark/10 border-ascii-spark text-ascii-spark font-bold'
-                        : 'bg-ascii-bright/5 border-ascii-mid/10 hover:border-ascii-spark hover:text-ascii-spark'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Test Weather</div>
-              <div className="flex flex-col gap-1">
-                {[
-                  { label: '☀️ Clear', cmd: 'W0,30,32,80,Ho Chi Minh City,Clear Sky\n', data: { temp: 30, feels: 32, humidity: 80, condition: 'Clear Sky', cityName: 'Ho Chi Minh City' } },
-                  { label: '☁️ Cloudy', cmd: 'W3,25,27,85,Ho Chi Minh City,Partly Cloudy\n', data: { temp: 25, feels: 27, humidity: 85, condition: 'Partly Cloudy', cityName: 'Ho Chi Minh City' } },
-                  { label: '🌫️ Fog', cmd: 'W45,20,20,95,Ho Chi Minh City,Foggy\n', data: { temp: 20, feels: 20, humidity: 95, condition: 'Foggy', cityName: 'Ho Chi Minh City' } },
-                  { label: '🌧️ Rain', cmd: 'W61,22,22,90,Ho Chi Minh City,Light Drizzle\n', data: { temp: 22, feels: 22, humidity: 90, condition: 'Light Drizzle', cityName: 'Ho Chi Minh City' } },
-                  { label: '⛈️ Storm', cmd: 'W95,18,18,98,Ho Chi Minh City,Thunderstorm\n', data: { temp: 18, feels: 18, humidity: 98, condition: 'Thunderstorm', cityName: 'Ho Chi Minh City' } },
-                  { label: '❄️ Snowy', cmd: 'W71,0,-2,90,Ho Chi Minh City,Light Snow\n', data: { temp: 0, feels: -2, humidity: 90, condition: 'Light Snow', cityName: 'Ho Chi Minh City' } },
-                  { label: '💨 Windy', cmd: 'W771,24,22,70,Ho Chi Minh City,Blowing Wind\n', data: { temp: 24, feels: 22, humidity: 70, condition: 'Blowing Wind', cityName: 'Ho Chi Minh City' } }
-                ].map((item, idx) => (
-                  <button
-                    key={idx}
-                    onClick={async () => {
-                      setWeatherTest(true)
-                      setWeatherData(item.data)
-                      await handleWriteSerial(item.cmd)
-                      await handleWriteSerial('6')
-                      setActiveMode('weather')
-                    }}
-                    className="w-full text-left px-2 py-1 rounded hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70 transition-all cursor-pointer text-[9px] flex items-center justify-between"
-                  >
-                    <span>{item.label}</span>
-                    <span className="text-[8px] text-ascii-dim font-mono">Send</span>
-                  </button>
-                ))}
-              </div>
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Mock Weather</div>
+                  <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto pr-1">
+                    {[
+                      { label: '☀️ Clear', cmd: 'W0,30,32,80,Ho Chi Minh City,Clear Sky\n', data: { temp: 30, feels: 32, humidity: 80, condition: 'Clear Sky', cityName: 'Ho Chi Minh City' } },
+                      { label: '☁️ Cloudy', cmd: 'W3,25,27,85,Ho Chi Minh City,Partly Cloudy\n', data: { temp: 25, feels: 27, humidity: 85, condition: 'Partly Cloudy', cityName: 'Ho Chi Minh City' } },
+                      { label: '🌫️ Fog', cmd: 'W45,20,20,95,Ho Chi Minh City,Foggy\n', data: { temp: 20, feels: 20, humidity: 95, condition: 'Foggy', cityName: 'Ho Chi Minh City' } },
+                      { label: '🌧️ Rain', cmd: 'W61,22,22,90,Ho Chi Minh City,Light Drizzle\n', data: { temp: 22, feels: 22, humidity: 90, condition: 'Light Drizzle', cityName: 'Ho Chi Minh City' } },
+                      { label: '⛈️ Storm', cmd: 'W95,18,18,98,Ho Chi Minh City,Thunderstorm\n', data: { temp: 18, feels: 18, humidity: 98, condition: 'Thunderstorm', cityName: 'Ho Chi Minh City' } },
+                      { label: '❄️ Snowy', cmd: 'W71,0,-2,90,Ho Chi Minh City,Light Snow\n', data: { temp: 0, feels: -2, humidity: 90, condition: 'Light Snow', cityName: 'Ho Chi Minh City' } },
+                      { label: '💨 Windy', cmd: 'W771,24,22,70,Ho Chi Minh City,Blowing Wind\n', data: { temp: 24, feels: 22, humidity: 70, condition: 'Blowing Wind', cityName: 'Ho Chi Minh City' } }
+                    ].map((item, idx) => (
+                      <button
+                        key={idx}
+                        onClick={async () => {
+                          setWeatherTest(true)
+                          setWeatherData(item.data)
+                          await handleWriteSerial(item.cmd)
+                          await handleWriteSerial('6')
+                          setActiveMode('weather')
+                        }}
+                        className="w-full text-left px-2 py-1 rounded hover:bg-ascii-bright/5 hover:text-ascii-spark text-ascii-bright/70 transition-all cursor-pointer text-[9px] flex items-center justify-between"
+                      >
+                        <span>{item.label}</span>
+                        <span className="text-[8px] text-ascii-dim font-mono">Send</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1060,9 +1105,9 @@ export default function App() {
                 ? 'bg-orange-950/10 border-orange-900/40 text-orange-400/80'
                 : 'bg-ascii-dim/15 border-ascii-mid/20 text-ascii-mid hover:text-ascii-spark hover:border-ascii-bright/40'
             }`}
-            title="Configure settings"
+            title="Open settings"
           >
-            ⚙️ CONFIGURE
+            ⚙️ SETTINGS
           </button>
         </div>
       </div>
