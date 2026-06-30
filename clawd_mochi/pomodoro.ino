@@ -251,6 +251,7 @@ void updatePomoFlash() {
   // Auto-dismiss after 10s and start the new phase cleanly
   if (millis() - pomoRingStartAt >= 10000UL) {
     pomodoroRinging    = false;
+    beepStop();
     pomodoroPhaseStart = millis();  // new phase starts from now
     if (currentMode == MODE_POMODORO) {
       drawPomodoroStatic();
@@ -263,6 +264,7 @@ void updatePomoFlash() {
   if (millis() - pomoRingingFlashAt < 300) return;
   pomoRingingFlashAt = millis();
   pomoRingingFlashOn = !pomoRingingFlashOn;
+  if (pomoRingingFlashOn) beep(2100, 150);   // chirp once per flash-on frame
 
   uint16_t bg = pomoRingingFlashOn ? C_ORANGE : C_WHITE;
   uint16_t fg = pomoRingingFlashOn ? C_WHITE  : C_ORANGE;

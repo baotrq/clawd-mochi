@@ -18,6 +18,11 @@
  *     1 = Animation mode     2 = Clock mode
  *     3 = Pomodoro mode      4 = Terminal mode
  *     5 = Usage mode (Claude Pro 5h/7d usage, see U below)
+ *     6 = Weather mode       7 = Sing mode (buzzer jukebox)
+ *
+ *   ── SING MODE (buzzer on GPIO5) ───────────────────────────────
+ *     q w e r t y = pick & play a song  space/o = play/pause
+ *     x = stop                          m = toggle loop
  *
  *   ── AUTO-CYCLING (Animation mode only — never interrupts 2/3/4/5) ──
  *     Idle loop: Animation (3-5 min) → Clock (3-5 min) → Weather (3-5 min,
@@ -89,6 +94,7 @@ void drawDroopyEyes(int16_t openH);
 #define TFT_DC  3
 #define TFT_RST 4
 #define TFT_BLK 1
+#define BUZZER_PIN 5   // passive piezo buzzer (+ → GPIO5, - → GND); driven by tone()
 
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
@@ -109,7 +115,7 @@ uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_GREEN;
 #define C_BLACK ST77XX_BLACK
 
 // ── Modes ─────────────────────────────────────────────────────
-enum Mode { MODE_ANIMATION, MODE_CLOCK, MODE_POMODORO, MODE_TERMINAL, MODE_USAGE, MODE_WEATHER };
+enum Mode { MODE_ANIMATION, MODE_CLOCK, MODE_POMODORO, MODE_TERMINAL, MODE_USAGE, MODE_WEATHER, MODE_SING };
 Mode currentMode = MODE_ANIMATION;
 
 // ── Animation-mode sub-state ──────────────────────────────────
@@ -176,6 +182,20 @@ String   alarmRingBuf        = "";
 
 // ── Cowsay ───────────────────────────────────────────────────────────
 bool     cowsayActive    = false;
+
+// ── Sing mode ────────────────────────────────────────────────────────
+// Non-blocking jukebox: a song is a list of (frequency, note-divisor) pairs
+// (see sing.ino). updateSing() advances one note at a time off millis() so
+// loop() keeps pumping serial/web. State lives here (not in sing.ino) because
+// mode_switching.ino is concatenated before sing.ino and needs to see it.
+int8_t   singSong    = 0;      // which song is selected (index into SONGS[])
+bool     singPlaying = false;  // is a note sequence currently sounding?
+uint16_t singNoteIdx = 0;      // index of the note currently playing
+uint32_t singNoteAt  = 0;      // millis() when the current note started
+uint16_t singNoteMs  = 0;      // how long the current note lasts
+bool     singLoop    = true;   // restart the song when it finishes
+uint32_t singBarAt   = 0;      // last equalizer-bar repaint time
+uint8_t  singBars[12] = {0};   // current equalizer bar heights
 
 
 // ── Numeric input prompt (used by 't' set-clock, 'r' set-alarm, and
@@ -451,6 +471,9 @@ void setup() {
   pinMode(TFT_BLK, OUTPUT);
   setBacklight(true);
 
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);   // passive buzzer idles silent
+
   SPI.begin(8, -1, 10, TFT_CS);   // SCK=8, MOSI=10
   tft.init(240, 240);
   tft.setSPISpeed(40000000);
@@ -463,7 +486,8 @@ void setup() {
   tft.setTextColor(C_WHITE); tft.setTextSize(3);
   tft.setCursor(DISP_W / 2 - 54, DISP_H / 2 - 22); tft.print("Clawd");
   tft.setCursor(DISP_W / 2 - 54, DISP_H / 2 + 14); tft.print("Mochi");
-  delay(1200);
+  startupChime();   // rising power-on jingle while the splash shows
+  delay(660);       // chime ~540ms + this ≈ original 1200ms splash hold
 
   // ── Logo shown once at startup, then straight into Animation mode
   //    (dynamicMode defaults true, so it starts idle-cycling right away) ──
@@ -482,6 +506,7 @@ void setup() {
   Serial.println("Clock mode: t=set time (HHMM)  r=set alarm (min from now)");
   Serial.println("Pomodoro mode: p=start/stop  P=MMSSB set+start (keeps ticking in background)");
   Serial.println("Terminal mode: type freely; \"exit\"+Enter to leave");
+  Serial.println("Sing mode (7): q/w/e/r/t/y pick song  space=play/pause  x=stop  m=loop");
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -572,6 +597,8 @@ void loop() {
     updateClockViewIfShown();
     updateUsageViewIfShown();
     if (currentMode == MODE_WEATHER) updateWeatherView();
+    updateSing();
+    updateSingView();
 
     if (dynamicMode && currentMode == MODE_ANIMATION && !busy && millis() >= nextIdleAnimAt) {
       eyeView = EYE_NORMAL;

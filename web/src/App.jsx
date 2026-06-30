@@ -107,6 +107,14 @@ const DEFAULT_HOTSPOTS = {
     cmd: '6',
     label: 'Window (Weather Mode)',
   },
+  sing: {
+    x: 0.8137,
+    y: 0.394,
+    r: 0.045,
+    mode: 'sing',
+    cmd: '7',
+    label: 'Music Box (Sing Mode)',
+  },
 }
 
 export default function App() {
@@ -413,6 +421,7 @@ export default function App() {
       else if (trimmed === 'MODE:TERMINAL') setActiveMode('terminal')
       else if (trimmed === 'MODE:USAGE') setActiveMode('usage')
       else if (trimmed === 'WEATHER') setActiveMode('weather')
+      else if (trimmed === 'MODE:SING') setActiveMode('sing')
     }
   }
 
@@ -1034,7 +1043,8 @@ export default function App() {
                       { label: 'Pomo', cmd: '3', mode: 'pomodoro' },
                       { label: 'Term', cmd: '4', mode: 'terminal' },
                       { label: 'Usage', cmd: '5', mode: 'usage' },
-                      { label: 'Wx', cmd: '6', mode: 'weather' }
+                      { label: 'Wx', cmd: '6', mode: 'weather' },
+                      { label: 'Sing', cmd: '7', mode: 'sing' }
                     ].map((item) => (
                       <button
                         key={item.cmd}

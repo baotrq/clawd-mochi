@@ -98,6 +98,16 @@ const EXPRESSIONS = [
   { label: 'Anthropic Logo', cmd: 'z', face: ' ⬡ ', desc: 'Draw Anthropic logo line by line' },
 ]
 
+// Mirrors the SONGS[] table in the firmware's sing.ino — keys must match.
+const SONGS = [
+  { key: 'q', label: 'Twinkle Star', emoji: '⭐' },
+  { key: 'w', label: 'Ode to Joy', emoji: '🎼' },
+  { key: 'e', label: "Mary's Lamb", emoji: '🐑' },
+  { key: 'r', label: 'Jingle Bells', emoji: '🔔' },
+  { key: 't', label: 'Happy Birthday', emoji: '🎂' },
+  { key: 'y', label: 'Tháng Tư Là Lời Nói Dối Của Anh', emoji: '🌸' },
+]
+
 export default function ControlPanel({
   activeMode,
   onClose,
@@ -144,6 +154,11 @@ export default function ControlPanel({
   const [pomoFocusStr, setPomoFocusStr] = useState('25')
   const [pomoFocusSecStr, setPomoFocusSecStr] = useState('0')
   const [pomoBreakStr, setPomoBreakStr] = useState('5')
+  // Sing-mode UI state. The device owns the real playback state; these mirror
+  // it optimistically so the buttons feel responsive (it's a toy jukebox).
+  const [singSong, setSingSong] = useState(null) // key of the selected song
+  const [singPlaying, setSingPlaying] = useState(false)
+  const [singLoop, setSingLoop] = useState(true)
   const [alarmTimeLeft, setAlarmTimeLeft] = useState('')
   const [timerTimeLeft, setTimerTimeLeft] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -412,6 +427,7 @@ export default function ControlPanel({
           {activeMode === 'pomodoro' && 'Pomodoro Timer'}
           {activeMode === 'usage' && 'Claude Usage'}
           {activeMode === 'weather' && 'Weather Station'}
+          {activeMode === 'sing' && 'Sing Mode'}
         </span>
         <button
           onClick={onClose}
@@ -1125,6 +1141,99 @@ export default function ControlPanel({
 
           <div className="text-[10px] text-ascii-mid leading-relaxed text-center italic">
             This mode displays live temperature, feels-like temperature, humidity, and retro weather animations (clear, cloudy, fog, rain, storm, snowy, windy) on the device.
+          </div>
+        </div>
+      )}
+
+      {activeMode === 'sing' && (
+        <div className="space-y-4">
+          {/* Now playing banner */}
+          <div className={`border rounded-xl p-3 text-center transition-all ${
+            singPlaying
+              ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-400'
+              : 'bg-ascii-dim/5 border-ascii-mid/15 text-ascii-mid'
+          }`}>
+            <div className="text-[9px] uppercase tracking-wider font-bold font-sans">
+              {singPlaying ? '🎵 Now Playing' : '⏸ Paused'}
+            </div>
+            <div className="text-sm font-bold font-mono text-ascii-spark mt-0.5">
+              {SONGS.find((s) => s.key === singSong)?.label || 'Pick a tune'}
+            </div>
+          </div>
+
+          {/* Song picker — sends the firmware's single-char song key */}
+          <div className="space-y-2">
+            <div className="text-[10px] text-ascii-mid uppercase font-bold tracking-wider">Songs</div>
+            <div className="grid grid-cols-1 gap-2">
+              {SONGS.map((song) => {
+                const sel = singSong === song.key
+                return (
+                  <button
+                    key={song.key}
+                    onClick={() => {
+                      // '7' guarantees the device is in Sing mode before the
+                      // song key lands (handleSingKey only runs in MODE_SING).
+                      onWriteSerial('7' + song.key)
+                      setSingSong(song.key)
+                      setSingPlaying(true)
+                    }}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-xl border transition-all cursor-pointer text-left ${
+                      sel
+                        ? 'bg-ascii-spark/10 border-ascii-spark/60 text-ascii-spark font-bold'
+                        : 'bg-ascii-dim/5 border-ascii-mid/15 text-ascii-bright hover:border-ascii-bright/40 hover:bg-ascii-bright/10'
+                    }`}
+                  >
+                    <span className="text-lg leading-none">{song.emoji}</span>
+                    <span className="text-xs font-sans">{song.label}</span>
+                    {sel && singPlaying && (
+                      <span className="ml-auto text-[9px] text-emerald-400 font-sans animate-pulse">▶ playing</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Transport controls */}
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => {
+                onWriteSerial(' ')
+                setSingPlaying((p) => {
+                  if (!p && !singSong) setSingSong('q')
+                  return !p
+                })
+              }}
+              className="bg-ascii-bright/10 hover:bg-ascii-bright/25 border border-ascii-mid/30 text-ascii-spark font-semibold py-2 rounded transition-all cursor-pointer text-center"
+            >
+              {singPlaying ? '⏸ Pause' : '▶ Play'}
+            </button>
+            <button
+              onClick={() => {
+                onWriteSerial('x')
+                setSingPlaying(false)
+              }}
+              className="bg-red-950/20 hover:bg-red-950/40 border border-red-900/40 text-red-400 font-semibold py-2 rounded transition-all cursor-pointer text-center"
+            >
+              ⏹ Stop
+            </button>
+            <button
+              onClick={() => {
+                onWriteSerial('m')
+                setSingLoop((l) => !l)
+              }}
+              className={`py-2 rounded border font-semibold transition-all cursor-pointer text-center ${
+                singLoop
+                  ? 'bg-ascii-spark/10 border-ascii-spark/60 text-ascii-spark'
+                  : 'bg-ascii-dim/5 border-ascii-mid/20 text-ascii-mid hover:text-ascii-bright'
+              }`}
+            >
+              🔁 Loop {singLoop ? 'On' : 'Off'}
+            </button>
+          </div>
+
+          <div className="text-[10px] text-ascii-mid leading-relaxed text-center italic">
+            Clawd plays public-domain tunes on the buzzer. Playback runs on the device — leaving Sing mode stops the music.
           </div>
         </div>
       )}

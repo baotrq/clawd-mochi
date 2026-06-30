@@ -10,6 +10,9 @@
 // used both for actual mode switches and for redraws after an overlay
 // (alarm / numeric input) closes.
 void switchMode(Mode m) {
+  // Leaving Sing mode silences the buzzer so a melody never bleeds over the
+  // clock/alarm. (Redraws within Sing pass MODE_SING, so playback survives those.)
+  if (m != MODE_SING) stopSong();
   currentMode = m;
   switch (m) {
     case MODE_ANIMATION:
@@ -51,6 +54,10 @@ void switchMode(Mode m) {
     case MODE_WEATHER:
       drawWeatherView();
       Serial.println("WEATHER");
+      break;
+    case MODE_SING:
+      drawSingView();
+      Serial.println("MODE:SING");
       break;
   }
 }
@@ -359,6 +366,7 @@ void handleChar(char c) {
     case '4': switchMode(MODE_TERMINAL);  return;
     case '5': switchMode(MODE_USAGE);     return;
     case '6': switchMode(MODE_WEATHER);   return;
+    case '7': switchMode(MODE_SING);      return;
     case 'b': setBacklight(!backlightOn); return;
     case 'U': collectingUsage = true; usageBuf = ""; return;
     case 'T': collectingClockSet = true; clockSetBuf = ""; return;
@@ -379,6 +387,7 @@ void handleChar(char c) {
     case MODE_ANIMATION: handleAnimationKey(c); break;
     case MODE_CLOCK:     handleClockKey(c);     break;
     case MODE_POMODORO:  handlePomodoroKey(c);  break;
+    case MODE_SING:      handleSingKey(c);      break;
     default: break;
   }
 }

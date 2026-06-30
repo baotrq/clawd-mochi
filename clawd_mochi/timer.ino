@@ -20,6 +20,7 @@ void armTimer(uint32_t seconds) {
 void disarmTimer() {
   timerActive  = false;
   timerRinging = false;
+  beepStop();
 }
 
 void checkTimer() {
@@ -40,6 +41,7 @@ void updateTimerFlash() {
   if (millis() - timerFlashAt < 300) return;
   timerFlashAt = millis();
   timerFlashOn = !timerFlashOn;
+  if (timerFlashOn) beep(1500, 150);   // chirp once per flash-on frame
   uint16_t bg = timerFlashOn ? C_ORANGE : C_WHITE;
   uint16_t fg = timerFlashOn ? C_WHITE  : C_ORANGE;
   tft.fillScreen(bg);
@@ -48,6 +50,7 @@ void updateTimerFlash() {
 
 void dismissTimer() {
   timerRinging = false;
+  beepStop();
   switchMode(currentMode);
 }
 

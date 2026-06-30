@@ -37,6 +37,7 @@ void updateAlarmFlash() {
   if (millis() - alarmFlashAt < 300) return;
   alarmFlashAt = millis();
   alarmFlashOn = !alarmFlashOn;
+  if (alarmFlashOn) beep(1800, 150);   // chirp once per flash-on frame
   uint16_t bg = alarmFlashOn ? C_ORANGE : C_WHITE;
   uint16_t fg = alarmFlashOn ? C_WHITE  : C_ORANGE;
   tft.fillScreen(bg);
@@ -45,11 +46,13 @@ void updateAlarmFlash() {
 
 void dismissAlarm() {
   alarmRinging = false;
+  beepStop();
   switchMode(currentMode);  // redraw whatever was on screen before it rang
 }
 
 void disarmAlarm() {
   alarmArmed   = false;
   alarmRinging = false;
+  beepStop();
 }
 
