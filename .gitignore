@@ -8,6 +8,9 @@ build/
 *.map
 *.hex
 
+# PlatformIO build output
+.pio/
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -30,3 +33,6 @@ ezgif-*-png-split/
 # Python
 __pycache__/
 *.pyc
+
+# Firmware WiFi credentials (see clawd_mochi/secrets.h.example)
+clawd_mochi/secrets.h

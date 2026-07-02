@@ -275,11 +275,15 @@ void handleChar(char c) {
         uint8_t mm = clockSetBuf.substring(2, 4).toInt(); if (mm > 59) mm = 59;
         uint8_t ss = clockSetBuf.length() == 6 ? clockSetBuf.substring(4, 6).toInt() : 0;
         if (ss > 59) ss = 59;
-        
+
+        // This payload carries only a time-of-day, no date — keep whatever
+        // date the device already has (from an earlier full-epoch sync, NTP,
+        // or the 1970 default) and only overwrite hour/min/sec. A hardcoded
+        // date here previously caused the display to jump to a fixed day.
+        time_t nowSecs;
+        time(&nowSecs);
         struct tm t;
-        t.tm_year = 126; // 2026 (years since 1900)
-        t.tm_mon = 5;    // June (0-11)
-        t.tm_mday = 29;  // 29th
+        localtime_r(&nowSecs, &t);
         t.tm_hour = hh;
         t.tm_min = mm;
         t.tm_sec = ss;

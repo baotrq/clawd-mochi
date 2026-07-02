@@ -6,6 +6,7 @@ let port = null;
 let writer = null;
 let reader = null;
 let keepReading = false;
+let disconnectListener = null; // the one 'disconnect' handler currently registered, if any
 
 export const isSerialSupported = () => {
   return typeof navigator !== 'undefined' && 'serial' in navigator;
@@ -16,23 +17,44 @@ export async function connectSerial(onDisconnect, onDataReceived) {
     throw new Error('Web Serial API is not supported in this browser. Please use Chrome, Edge, or Opera.');
   }
 
+  // Tear down any previous session first — this also removes its
+  // 'disconnect' listener so stale listeners never pile up on
+  // navigator.serial across repeated connect/disconnect cycles (a leaked
+  // listener from an old session firing mid-connect is what used to crash
+  // this function with "Cannot read properties of null (reading 'writable')").
+  if (port || disconnectListener) {
+    await disconnectSerial();
+  }
+
+  let requestedPort = null;
   try {
     // Request a port and open a connection.
-    port = await navigator.serial.requestPort();
-    await port.open({ baudRate: 115200 });
+    requestedPort = await navigator.serial.requestPort();
+    await requestedPort.open({ baudRate: 115200 });
+
+    // The device can drop off USB right as it's opening (flaky radio/USB on
+    // this board) — check the streams exist instead of assuming they do.
+    if (!requestedPort.writable || !requestedPort.readable) {
+      throw new Error('Port opened but has no data streams — the device likely reset or dropped off USB. Unplug/replug it and try again.');
+    }
+
+    port = requestedPort;
 
     // Set up text encoder and writer
     const textEncoder = new TextEncoderStream();
-    const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+    textEncoder.readable.pipeTo(port.writable).catch(() => {});
     writer = textEncoder.writable.getWriter();
 
-    // Monitor port disconnection events
-    navigator.serial.addEventListener('disconnect', (event) => {
-      if (event.port === port) {
+    // Monitor this specific port's disconnection — bound to requestedPort
+    // (not the shared, mutable `port` variable), and always removed by
+    // disconnectSerial() so it can't outlive this session.
+    disconnectListener = (event) => {
+      if (event.port === requestedPort) {
         disconnectSerial();
         if (onDisconnect) onDisconnect();
       }
-    });
+    };
+    navigator.serial.addEventListener('disconnect', disconnectListener);
 
     // Start read loop if requested
     if (onDataReceived) {
@@ -42,6 +64,7 @@ export async function connectSerial(onDisconnect, onDataReceived) {
     return true;
   } catch (err) {
     console.error('Serial connection failed:', err);
+    if (requestedPort) port = requestedPort;
     await disconnectSerial();
     throw err;
   }
@@ -49,6 +72,11 @@ export async function connectSerial(onDisconnect, onDataReceived) {
 
 export async function disconnectSerial() {
   keepReading = false;
+
+  if (disconnectListener) {
+    navigator.serial.removeEventListener('disconnect', disconnectListener);
+    disconnectListener = null;
+  }
 
   if (reader) {
     try {

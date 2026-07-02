@@ -71,7 +71,9 @@
  *   ── TERMINAL MODE ─────────────────────────────────────────────
  *     type freely; "exit" + Enter returns to Animation mode
  *
- *   (no RTC — clock runs off millis(), defaults to 00:00 at boot)
+ *   (no RTC — clock runs off millis(), defaults to 00:00 at boot, unless
+ *    STA_SSID/STA_PASS are set, in which case WiFi+NTP fills in real time
+ *    in the background as soon as it connects — see wifi_time.ino)
  * ╚══════════════════════════════════════════════════════════════╝
  */
 
@@ -81,6 +83,15 @@
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
+#include <WiFi.h>
+
+// ── WiFi (optional, background NTP time backup — see wifi_time.ino) ────
+// Credentials live in secrets.h (gitignored, not committed) so a real WiFi
+// password never lands in git history. Copy secrets.h.example to secrets.h
+// in this same folder and fill in STA_SSID/STA_PASS; leave both blank to
+// skip WiFi entirely and rely on millis()/Serial 't'/'T' as before.
+#include "secrets.h"
+#define TZ_OFFSET_SEC (7 * 3600)   // Ho Chi Minh City, ICT, UTC+7, no DST
 
 // ── Forward Declarations ──────────────────────────────────────
 void drawNormalEyes(int16_t ox = 0, bool blink = false, int16_t oy = 0);
@@ -467,6 +478,19 @@ void setup() {
   Serial.begin(115200);
   randomSeed(esp_random());
 
+  // Set the Vietnam (ICT, UTC+7) offset unconditionally, up front, via the
+  // plain libc mechanism (no network/SNTP touched — safe before WiFi is
+  // ever initialized). This makes every localtime_r()/mktime() call correct
+  // from boot onward regardless of whether/when WiFi+NTP (wifi_time.ino)
+  // connects. It must not be gated behind a successful WiFi connection: the
+  // web app's own silent time syncs ('T' + epoch, sent over Serial right on
+  // connect) race ahead of WiFi/NTP and would otherwise "win" first, setting
+  // timeSynced=true and permanently skipping wifi_time.ino's configTime()
+  // call for the rest of the boot session — leaving the clock stuck on
+  // raw UTC (7h behind) even though the underlying time itself is correct.
+  setenv("TZ", "ICT-7", 1);
+  tzset();
+
 
   pinMode(TFT_BLK, OUTPUT);
   setBacklight(true);
@@ -582,6 +606,8 @@ void maybeAutoShowUsage() {
 
 void loop() {
   while (Serial.available()) handleChar(Serial.read());
+
+  updateWifiTime();
 
   checkAlarm();
   updateAlarmFlash();

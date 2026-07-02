@@ -159,6 +159,8 @@ export default function App() {
   const [streamIdx, setStreamIdx] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
   const [settingsTab, setSettingsTab] = useState('sys')
+  const [serialLog, setSerialLog] = useState([]) // [{ ts, text }] raw device Serial output, capped
+  const serialLogViewRef = useRef(null)
   const audioRef = useRef(null)
 
   // Manage Audio element lifecycle
@@ -406,11 +408,22 @@ export default function App() {
   // echoes (e.g. "POMO:ON"/"POMO:OFF") — this is the actual source of truth
   // for Pomodoro state, not a local guess made when we send 'p'.
   const serialLineBufRef = useRef('')
+  const SERIAL_LOG_MAX = 300
   const handleSerialData = (chunk) => {
     console.log('[ESP32 Serial]:', chunk)
     serialLineBufRef.current += chunk
     const lines = serialLineBufRef.current.split('\n')
     serialLineBufRef.current = lines.pop() // keep any incomplete trailing line
+
+    const printable = lines.map(l => l.replace(/\r$/, '')).filter(l => l.length > 0)
+    if (printable.length) {
+      const ts = new Date().toLocaleTimeString([], { hour12: false })
+      setSerialLog(prev => {
+        const next = [...prev, ...printable.map(text => ({ ts, text }))]
+        return next.length > SERIAL_LOG_MAX ? next.slice(next.length - SERIAL_LOG_MAX) : next
+      })
+    }
+
     for (const line of lines) {
       const trimmed = line.trim()
       if (trimmed === 'POMO:ON') setIsPomoActive(true)
@@ -475,6 +488,13 @@ export default function App() {
     }, 1000)
     return () => clearInterval(timer)
   }, [activeAlarm, activeTimer, alarms, isConnected])
+
+  // Auto-scroll the Serial log view to the newest line whenever it's open
+  useEffect(() => {
+    if (settingsTab === 'log' && serialLogViewRef.current) {
+      serialLogViewRef.current.scrollTop = serialLogViewRef.current.scrollHeight
+    }
+  }, [serialLog, settingsTab])
 
   // Listen to keyboard shortcuts for calibration mode
   useEffect(() => {
@@ -906,6 +926,7 @@ export default function App() {
                 {[
                   { id: 'sys', label: '⚙️ Sys' },
                   { id: 'audio', label: '🔊 Audio' },
+                  { id: 'log', label: '📜 Log' },
                   { id: 'test', label: '🧪 Test' }
                 ].map(tab => (
                   <button
@@ -1029,6 +1050,39 @@ export default function App() {
                         className="w-full h-1.5 bg-ascii-mid/20 rounded-lg appearance-none cursor-pointer accent-[#e05f3e] outline-none"
                       />
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === 'log' && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between px-1 border-b border-ascii-mid/10 pb-1">
+                    <div className="text-[9px] text-ascii-dim uppercase font-bold select-none">ESP32 Serial Log</div>
+                    <button
+                      onClick={() => setSerialLog([])}
+                      className="text-[9px] text-ascii-mid hover:text-red-400 transition-all cursor-pointer"
+                    >
+                      🗑️ Clear
+                    </button>
+                  </div>
+                  <div
+                    ref={serialLogViewRef}
+                    className="h-[190px] overflow-y-auto bg-black/40 border border-ascii-mid/15 rounded p-1.5 font-mono text-[9px] leading-tight whitespace-pre-wrap break-all"
+                  >
+                    {serialLog.length === 0 ? (
+                      <div className="text-ascii-mid italic">
+                        {isConnected ? 'Waiting for device output…' : 'Not connected — connect over Serial to see boot/WiFi/NTP output here.'}
+                      </div>
+                    ) : (
+                      serialLog.map((entry, i) => (
+                        <div key={i} className="text-ascii-bright/70">
+                          <span className="text-ascii-mid">{entry.ts}</span> {entry.text}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="text-[8px] text-ascii-dim px-1 select-none">
+                    Look for "WiFi: time synced via NTP. Got internet." to confirm.
                   </div>
                 </div>
               )}

@@ -96,7 +96,7 @@ Alarm and timer take an optional name after a space — e.g. `0730 Wake up`, `30
 **Terminal:** type freely; `exit` + Enter leaves
 **Sync (sent by the web app, silent):** `T` set clock · `U` push usage stats
 
-> No RTC — the clock runs off `millis()` and defaults to `00:00` until set.
+> No RTC — the clock runs off `millis()` and defaults to `00:00` until set (manually over Serial, or automatically via WiFi+NTP if configured — see [Connectivity](#-connectivity)).
 
 ---
 
@@ -151,13 +151,11 @@ Alarm and timer take an optional name after a space — e.g. `0730 Wake up`, `30
 
 ## 📶 Connectivity
 
-Clawd Mochi can be controlled three ways, in order of reliability:
+**Control** is always over **USB Web Serial / Serial @ 115200** — that's how the web controller talks to the device, and it's the only control surface. There's no embedded control page and no WiFi AP.
 
-1. **USB Web Serial (recommended)** — how the web controller works. Deterministic, secure-context, no radio involved.
-2. **WiFi STA** — set `STA_SSID` / `STA_PASS` near the top of the sketch to join your home WiFi (2.4 GHz); the device prints `Browse to http://<ip>` at boot and serves its own embedded page there. *(Don't commit real credentials — this repo is public.)*
-3. **WiFi AP fallback** — if STA is blank or fails, the device hosts its own access point (`AP_SSID` / `AP_PASS` in the sketch) at `192.168.4.1`.
+**WiFi** is used for exactly one thing: a background **NTP time sync**, purely as a backup for the `t`/`T` Serial time-set commands. Copy [`clawd_mochi/secrets.h.example`](clawd_mochi/secrets.h.example) to `clawd_mochi/secrets.h` and fill in `STA_SSID` / `STA_PASS` to join your home WiFi (2.4 GHz) — the device connects in the background and fills in real wall-clock time (`wifi_time.ino`) as soon as it syncs. `secrets.h` is gitignored so your real credentials never get committed. `clawd_mochi.ino` `#include`s `secrets.h`, so **the file must exist to compile** — copy the example even if you're leaving it blank. Blank credentials just skip WiFi altogether; the clock then behaves exactly as before (`millis()`-based, set manually over Serial).
 
-> ⚠️ **WiFi is RF-limited.** The AP reports as started but is weak/intermittent over the air — a known antenna limitation of the ESP32-C3 Super Mini, not a setting you can fix (CPU frequency does **not** change this). For anything important, use **USB / Serial @ 115200**, which always works.
+> ⚠️ **This board's radio is flaky.** The ESP32-C3 Super Mini has a known antenna limitation that makes WiFi weak/intermittent over the air — not a setting you can fix (CPU frequency does **not** change this). The NTP sync is written to retry quietly in the background and never blocks anything if it fails; control always works over **USB / Serial**, WiFi or not.
 
 ---
 
