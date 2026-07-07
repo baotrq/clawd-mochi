@@ -86,6 +86,9 @@
 #include <WiFi.h>
 #include <Preferences.h>
 
+enum InputKind { INPUT_NONE, INPUT_CLOCK_SET, INPUT_ALARM_SET, INPUT_TIMER_SEC, INPUT_POMO_WORK, INPUT_POMO_BREAK };
+enum WeatherCondition { WC_CLEAR, WC_CLOUDY, WC_FOG, WC_RAIN, WC_STORM, WC_SNOWY, WC_WINDY };
+
 // ── WiFi (optional, background NTP time backup — see wifi_time.ino) ────
 // Credentials live in secrets.h (gitignored, not committed) so a real WiFi
 // password never lands in git history. Copy secrets.h.example to secrets.h
@@ -192,6 +195,8 @@ DualSerialClass DualSerial;
 // ── Forward Declarations ──────────────────────────────────────
 void handleChar(char c);
 void drawUsageView();
+void enterTimeInput(InputKind kind);
+WeatherCondition wmoToCondition(uint16_t wmo);
 void drawNormalEyes(int16_t ox = 0, bool blink = false, int16_t oy = 0);
 void drawEyesAsym(int16_t lxOff, int16_t lyOff, int16_t rxOff, int16_t ryOff, bool blink = false);
 void drawSquishEyes(bool closed = false);
@@ -350,7 +355,6 @@ uint8_t  singBars[12] = {0};   // current equalizer bar heights
 
 // ── Numeric input prompt (used by 't' set-clock, 'r' set-alarm, and
 //    'y' set-timer, Clock-mode-only commands) ──────────────────────────
-enum InputKind { INPUT_NONE, INPUT_CLOCK_SET, INPUT_ALARM_SET, INPUT_TIMER_SEC, INPUT_POMO_WORK, INPUT_POMO_BREAK };
 InputKind inputKind = INPUT_NONE;
 String    inputBuf  = "";
 
@@ -388,7 +392,6 @@ bool   collectingPomoStart = false;
 String pomoStartBuf        = "";
 
 // ── Weather Data State ────────────────────────────────────────
-enum WeatherCondition { WC_CLEAR, WC_CLOUDY, WC_FOG, WC_RAIN, WC_STORM, WC_SNOWY, WC_WINDY };
 struct WeatherData {
   WeatherCondition cond;
   int8_t tempC;
