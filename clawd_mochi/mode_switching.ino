@@ -131,6 +131,70 @@ void handlePomodoroKey(char c) {
 // Priority: alarm overlay > numeric input overlay > terminal free-text >
 // global keys (mode switch, backlight, speed) > current mode's own keys.
 void handleChar(char c) {
+  extern bool collectingAlarms;
+  extern String alarmsBuf;
+  
+  if (collectingAlarms) {
+    if (c == '\n' || c == '\r') {
+      alarmsBuf.trim();
+      if (alarmsBuf.length() > 0) {
+        if (alarmsBuf.startsWith("C")) {
+          for (int i = 0; i < 10; i++) {
+            alarmsList[i].enabled = false;
+            alarmsList[i].hour = 0;
+            alarmsList[i].minute = 0;
+            alarmsList[i].days = 0;
+            memset(alarmsList[i].name, 0, sizeof(alarmsList[i].name));
+          }
+          saveAlarmsToFlash();
+          Serial.println("Alarms cleared.");
+        } else if (alarmsBuf.startsWith("S ")) {
+          String params = alarmsBuf.substring(2);
+          int firstSpace = params.indexOf(' ');
+          int secondSpace = params.indexOf(' ', firstSpace + 1);
+          int thirdSpace = params.indexOf(' ', secondSpace + 1);
+          int fourthSpace = params.indexOf(' ', thirdSpace + 1);
+          int fifthSpace = params.indexOf(' ', fourthSpace + 1);
+          
+          if (firstSpace != -1 && secondSpace != -1 && thirdSpace != -1 && fourthSpace != -1) {
+            int idx = params.substring(0, firstSpace).toInt();
+            bool enabled = params.substring(firstSpace + 1, secondSpace).toInt() == 1;
+            uint8_t hour = params.substring(secondSpace + 1, thirdSpace).toInt();
+            uint8_t minute = params.substring(thirdSpace + 1, fourthSpace).toInt();
+            uint8_t days = 0;
+            String name = "";
+            
+            if (fifthSpace != -1) {
+              days = params.substring(fourthSpace + 1, fifthSpace).toInt();
+              name = params.substring(fifthSpace + 1);
+            } else {
+              days = params.substring(fourthSpace + 1).toInt();
+            }
+            
+            if (idx >= 0 && idx < 10) {
+              alarmsList[idx].enabled = enabled;
+              alarmsList[idx].hour = hour;
+              alarmsList[idx].minute = minute;
+              alarmsList[idx].days = days;
+              name.trim();
+              if (name.length() > 23) name = name.substring(0, 23);
+              memset(alarmsList[idx].name, 0, sizeof(alarmsList[idx].name));
+              memcpy(alarmsList[idx].name, name.c_str(), name.length());
+              
+              saveAlarmsToFlash();
+              Serial.printf("Alarm [%d] set: %02d:%02d, Days: %d, Name: %s\n", idx, hour, minute, days, alarmsList[idx].name);
+            }
+          }
+        }
+      }
+      collectingAlarms = false;
+      alarmsBuf = "";
+    } else if (c >= 32 && c <= 126 && alarmsBuf.length() < 64) {
+      alarmsBuf += c;
+    }
+    return;
+  }
+
   if (cowsayActive) {
     cowsayActive = false;
     switchMode(currentMode);
@@ -377,6 +441,29 @@ void handleChar(char c) {
     case 'P': collectingPomoStart = true; pomoStartBuf = ""; return;
     case 'W': wxCollecting = true; wxBuf = ""; return;
     case 'I': collectingIdleInterval = true; idleBuf = ""; return;
+    case 'A': collectingAlarms = true; alarmsBuf = ""; return;
+    case 'Q':
+      if (currentMode == MODE_ANIMATION) Serial.println("MODE:ANIMATION");
+      else if (currentMode == MODE_CLOCK) Serial.println("MODE:CLOCK");
+      else if (currentMode == MODE_POMODORO) Serial.println("MODE:POMODORO");
+      else if (currentMode == MODE_TERMINAL) Serial.println("MODE:TERMINAL");
+      else if (currentMode == MODE_USAGE) Serial.println("MODE:USAGE");
+      else if (currentMode == MODE_WEATHER) Serial.println("MODE:WEATHER");
+      else if (currentMode == MODE_SING) Serial.println("MODE:SING");
+      
+      Serial.println(pomodoroActive ? "POMO:ON" : "POMO:OFF");
+      Serial.printf("USAGE_DATA %d %d %d %d\n", usageSessionPct, usageWeeklyPct, usageSessionResetMin, usageWeeklyResetMin);
+      
+      for (int i = 0; i < 10; i++) {
+        Serial.printf("ALARM_DATA %d %d %d %d %d %s\n", 
+                      i, 
+                      alarmsList[i].enabled ? 1 : 0, 
+                      alarmsList[i].hour, 
+                      alarmsList[i].minute, 
+                      alarmsList[i].days, 
+                      alarmsList[i].name[0] ? alarmsList[i].name : "-");
+      }
+      return;
     case '-':
       animSpeed = animSpeed > 1 ? animSpeed - 1 : 1;
       Serial.print("Speed: "); Serial.println(animSpeed);

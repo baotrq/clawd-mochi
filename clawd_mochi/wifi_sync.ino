@@ -92,6 +92,7 @@ void fetchClaudeUsage() {
 
         Serial.printf("WiFi Sync Success: Session %d%% (resets in %d min), Weekly %d%% (resets in %d min)\n", 
                       usageSessionPct, usageSessionResetMin, usageWeeklyPct, usageWeeklyResetMin);
+        Serial.printf("USAGE_DATA %d %d %d %d\n", usageSessionPct, usageWeeklyPct, usageSessionResetMin, usageWeeklyResetMin);
 
         // Redraw if we are currently looking at the usage mode
         if (currentMode == MODE_USAGE) {

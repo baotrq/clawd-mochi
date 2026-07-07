@@ -153,6 +153,36 @@ export default function App() {
     }
   }
 
+  const syncAlarmsToDevice = async (alarmsList) => {
+    if (!isConnected) return;
+    try {
+      await writeSerial('A C\n');
+      for (let i = 0; i < Math.min(10, alarmsList.length); i++) {
+        const alarm = alarmsList[i];
+        const enabledVal = alarm.enabled ? 1 : 0;
+        const [hh, mm] = alarm.time.split(':').map(Number);
+        
+        let daysByte = 0;
+        const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6];
+        days.forEach(d => {
+          daysByte |= (1 << d);
+        });
+        
+        const cleanName = removeVietnameseTones(alarm.name || '').substring(0, 20);
+        const cmd = `A S ${i} ${enabledVal} ${hh} ${mm} ${daysByte}${cleanName ? ' ' + cleanName : ''}\n`;
+        await writeSerial(cmd);
+      }
+    } catch (e) {
+      console.error('Failed to sync alarms to device:', e);
+    }
+  }
+
+  useEffect(() => {
+    if (isConnected) {
+      syncAlarmsToDevice(alarms);
+    }
+  }, [alarms, isConnected]);
+
   const activeModeRef = useRef(null)
   const [activeMode, setActiveMode] = useState(null) // 'animation' | 'clock' | 'terminal' | null
   const [activeAlarm, setActiveAlarm] = useState(null) // { durationMins, endTime }
@@ -470,6 +500,69 @@ export default function App() {
       else if (trimmed === 'MODE:USAGE') setActiveMode('usage')
       else if (trimmed === 'WEATHER') setActiveMode('weather')
       else if (trimmed === 'MODE:SING') setActiveMode('sing')
+      else if (trimmed.startsWith('USAGE_DATA ')) {
+        const parts = trimmed.substring(11).split(' ')
+        if (parts.length >= 4) {
+          const sessionPct = parseInt(parts[0], 10)
+          const weeklyPct = parseInt(parts[1], 10)
+          const sessionMin = parseInt(parts[2], 10)
+          const weeklyMin = parseInt(parts[3], 10)
+          
+          setUsage({
+            sessionPct,
+            weeklyPct,
+            sessionResetAt: sessionMin > 0 ? Date.now() + sessionMin * 60000 : null,
+            weeklyResetAt: weeklyMin > 0 ? Date.now() + weeklyMin * 60000 : null,
+          })
+        }
+      }
+      else if (trimmed.startsWith('ALARM_DATA ')) {
+        const parts = trimmed.substring(11).split(' ')
+        if (parts.length >= 5) {
+          const idx = parseInt(parts[0], 10)
+          const enabled = parseInt(parts[1], 10) === 1
+          const hour = parseInt(parts[2], 10)
+          const minute = parseInt(parts[3], 10)
+          const daysByte = parseInt(parts[4], 10)
+          const name = parts.slice(5).join(' ')
+          
+          const days = []
+          for (let d = 0; d < 7; d++) {
+            if (daysByte & (1 << d)) {
+              days.push(d)
+            }
+          }
+          
+          const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+          const cleanName = name === '-' ? '' : name
+          
+          setAlarms(prev => {
+            const next = [...prev]
+            while (next.length <= idx) {
+              next.push({ id: Math.random().toString(36).substring(2, 9), name: '', time: '00:00', enabled: false, days: [] })
+            }
+            const nextAlarm = {
+              id: next[idx]?.id || Math.random().toString(36).substring(2, 9),
+              name: cleanName,
+              time: timeStr,
+              enabled,
+              days,
+            }
+            if (
+              next[idx]?.enabled !== nextAlarm.enabled ||
+              next[idx]?.time !== nextAlarm.time ||
+              next[idx]?.name !== nextAlarm.name ||
+              JSON.stringify(next[idx]?.days) !== JSON.stringify(nextAlarm.days)
+            ) {
+              next[idx] = nextAlarm
+              const filtered = next.filter(a => a)
+              localStorage.setItem('mochi-alarms', JSON.stringify(filtered))
+              return filtered
+            }
+            return prev
+          })
+        }
+      }
     }
   }
 
@@ -508,13 +601,8 @@ export default function App() {
     const timer = setInterval(() => {
       const now = Date.now()
       if (activeAlarm && now >= activeAlarm.endTime) {
-        // Fire a one-shot ring on the device at the accurate T-0, then
-        // re-pick the next occurrence (tomorrow for a daily alarm). Pass the
-        // alarm's name so the device shows it instead of "ALARM!".
-        if (isConnected) {
-          const nm = asciiName(activeAlarm.name)
-          writeSerial(`R${nm ? ' ' + nm : ''}\n`)
-        }
+        // Alarms trigger standalone on the ESP32 now.
+        // We just recalculate the next occurrence for the browser UI.
         setActiveAlarm(getClosestAlarm(alarms))
       }
       if (activeTimer && now >= activeTimer.endTime) {
@@ -522,7 +610,7 @@ export default function App() {
       }
     }, 1000)
     return () => clearInterval(timer)
-  }, [activeAlarm, activeTimer, alarms, isConnected])
+  }, [activeAlarm, activeTimer, alarms])
 
   // Auto-scroll the Serial log view to the newest line whenever it's open
   useEffect(() => {
@@ -598,6 +686,8 @@ export default function App() {
         // the device is currently showing (default Animation), no panel pop
         const epoch = Math.floor(Date.now() / 1000)
         await writeSerial(`T${epoch}\n`)
+        // Query status (alarms, usage, pomo state)
+        await writeSerial('Q\n')
       } catch (err) {
         alert(`Failed to connect to ESP32: ${err.message}`)
       }

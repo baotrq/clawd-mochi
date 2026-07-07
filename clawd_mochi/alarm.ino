@@ -7,11 +7,49 @@
 // ═════════════════════════════════════════════════════════════
 
 void checkAlarm() {
+  // 1. Check manual relative countdown alarm
   if (alarmArmed && millis() >= alarmAtMillis) {
     alarmArmed   = false;
     alarmRinging    = true;
     alarmFlashAt    = 0;
     alarmRingStartAt = millis();
+    return;
+  }
+
+  // 2. Check persistent daily/weekly alarms (requires time sync)
+  extern bool timeSynced;
+  if (!timeSynced) return;
+
+  time_t nowSecs;
+  time(&nowSecs);
+  struct tm t;
+  localtime_r(&nowSecs, &t);
+
+  static int lastRungMinute = -1;
+  static int lastRungHour = -1;
+  static int lastRungDay = -1;
+
+  if (t.tm_min == lastRungMinute && t.tm_hour == lastRungHour && t.tm_mday == lastRungDay) {
+    return; // Already triggered this minute
+  }
+
+  for (int i = 0; i < 10; i++) {
+    if (alarmsList[i].enabled) {
+      if (alarmsList[i].hour == t.tm_hour && alarmsList[i].minute == t.tm_min) {
+        uint8_t dayOfWeek = t.tm_wday; // 0 = Sun, 1 = Mon, ..., 6 = Sat
+        if (alarmsList[i].days & (1 << dayOfWeek)) {
+          // Match found! Trigger alarm
+          alarmRinging = true;
+          alarmName = String(alarmsList[i].name);
+          alarmFlashAt = 0;
+          alarmRingStartAt = millis();
+          lastRungMinute = t.tm_min;
+          lastRungHour = t.tm_hour;
+          lastRungDay = t.tm_mday;
+          break;
+        }
+      }
+    }
   }
 }
 

@@ -84,6 +84,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <WiFi.h>
+#include <Preferences.h>
 
 // ── WiFi (optional, background NTP time backup — see wifi_time.ino) ────
 // Credentials live in secrets.h (gitignored, not committed) so a real WiFi
@@ -262,6 +263,45 @@ uint8_t  pomoIdleStep       = 0;
 uint32_t pomoIdleNextAt     = 0;
 
 // ── Alarm ────────────────────────────────────────────────────────────
+struct DeviceAlarm {
+  bool enabled;
+  uint8_t hour;
+  uint8_t minute;
+  uint8_t days; // Bitmask: Bit 0 = Sun, Bit 1 = Mon, ..., Bit 6 = Sat
+  char name[24];
+};
+
+#define MAX_ALARMS 10
+DeviceAlarm alarmsList[MAX_ALARMS];
+Preferences preferences;
+
+void loadAlarmsFromFlash() {
+  preferences.begin("clawd-alarms", false);
+  for (int i = 0; i < MAX_ALARMS; i++) {
+    String key = "alarm_" + String(i);
+    size_t len = preferences.getBytes(key.c_str(), &alarmsList[i], sizeof(DeviceAlarm));
+    if (len != sizeof(DeviceAlarm)) {
+      alarmsList[i].enabled = false;
+      alarmsList[i].hour = 0;
+      alarmsList[i].minute = 0;
+      alarmsList[i].days = 0;
+      memset(alarmsList[i].name, 0, sizeof(alarmsList[i].name));
+    }
+  }
+  preferences.end();
+  Serial.println("Alarms loaded from Flash NVS.");
+}
+
+void saveAlarmsToFlash() {
+  preferences.begin("clawd-alarms", false);
+  for (int i = 0; i < MAX_ALARMS; i++) {
+    String key = "alarm_" + String(i);
+    preferences.putBytes(key.c_str(), &alarmsList[i], sizeof(DeviceAlarm));
+  }
+  preferences.end();
+  Serial.println("Alarms saved to Flash NVS.");
+}
+
 bool     alarmArmed    = false;
 bool     alarmRinging    = false;
 uint32_t alarmAtMillis   = 0;
@@ -287,6 +327,8 @@ String   timerName = "";
 // optionally carrying a name — collected here char-by-char until newline.
 bool     collectingAlarmRing = false;
 String   alarmRingBuf        = "";
+bool     collectingAlarms    = false;
+String   alarmsBuf           = "";
 
 // ── Cowsay ───────────────────────────────────────────────────────────
 bool     cowsayActive    = false;
@@ -576,6 +618,7 @@ void setup() {
   initBLE();
   initMQTT();
   randomSeed(esp_random());
+  loadAlarmsFromFlash();
 
   // Set the Vietnam (ICT, UTC+7) offset unconditionally, up front, via the
   // plain libc mechanism (no network/SNTP touched — safe before WiFi is
