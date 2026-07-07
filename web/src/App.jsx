@@ -18,6 +18,12 @@ import {
   writeBluetooth,
 } from './lib/bluetooth.js'
 
+import {
+  connectMQTT,
+  disconnectMQTT,
+  publishMQTT,
+} from './lib/mqtt.js'
+
 function removeVietnameseTones(str) {
   if (!str) return '';
   let result = String(str);
@@ -126,11 +132,22 @@ const DEFAULT_HOTSPOTS = {
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false)
-  const [connectionType, setConnectionType] = useState('serial') // 'serial' | 'bluetooth'
+  const [connectionType, setConnectionType] = useState('serial') // 'serial' | 'bluetooth' | 'wifi'
+  const [mqttKey, setMqttKey] = useState(() => {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('mochi-mqtt-key') || 'mochi_baotrq_relay';
+    }
+    return 'mochi_baotrq_relay';
+  })
+
+  const mqttTopicSub = `baotrq/clawd/control/${mqttKey}`;
+  const mqttTopicPub = `baotrq/clawd/status/${mqttKey}`;
 
   const writeSerial = async (data) => {
     if (connectionType === 'bluetooth') {
       return await writeBluetooth(data)
+    } else if (connectionType === 'wifi') {
+      return await publishMQTT(mqttTopicSub, data)
     } else {
       return await rawWriteSerial(data)
     }
@@ -543,6 +560,8 @@ export default function App() {
     if (isConnected) {
       if (connectionType === 'bluetooth') {
         await disconnectBluetooth()
+      } else if (connectionType === 'wifi') {
+        await disconnectMQTT()
       } else {
         await disconnectSerial()
       }
@@ -551,6 +570,15 @@ export default function App() {
       try {
         if (connectionType === 'bluetooth') {
           await connectBluetooth(
+            // On disconnect
+            () => setIsConnected(false),
+            // On data received from ESP32
+            handleSerialData
+          )
+        } else if (connectionType === 'wifi') {
+          await connectMQTT(
+            mqttTopicSub,
+            mqttTopicPub,
             // On disconnect
             () => setIsConnected(false),
             // On data received from ESP32
@@ -954,10 +982,21 @@ export default function App() {
               >
                 BLE
               </button>
+              <button
+                onClick={() => setConnectionType('wifi')}
+                className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+                  connectionType === 'wifi'
+                    ? 'bg-[#e05f3e] text-white font-bold'
+                    : 'text-ascii-mid hover:text-ascii-bright'
+                }`}
+                title="Use WiFi Cloud Relay Connection"
+              >
+                WIFI
+              </button>
             </div>
           )}
 
-          {((connectionType === 'serial' && isSerialSupported()) || (connectionType === 'bluetooth' && isBluetoothSupported())) ? (
+          {(connectionType === 'wifi' || (connectionType === 'serial' && isSerialSupported()) || (connectionType === 'bluetooth' && isBluetoothSupported())) ? (
             <button
               onClick={handleConnect}
               className={`flex items-center gap-2 px-2.5 py-1 rounded text-[10px] font-mono tracking-wider transition-all duration-300 border cursor-pointer ${
@@ -966,7 +1005,7 @@ export default function App() {
                   : 'bg-ascii-dim/15 border-ascii-mid/20 text-ascii-mid hover:text-ascii-spark hover:border-ascii-bright/40'
               }`}
             >
-              <span className="text-[12px]">{connectionType === 'bluetooth' ? '📡' : '🔌'}</span>
+              <span className="text-[12px]">{connectionType === 'wifi' ? '☁️' : (connectionType === 'bluetooth' ? '📡' : '🔌')}</span>
               <span>{isConnected ? `${connectionType.toUpperCase()}: CONNECTED` : `CONNECT ${connectionType.toUpperCase()}`}</span>
             </button>
           ) : (
@@ -1055,7 +1094,7 @@ export default function App() {
                   </button>
 
                   <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">Idle Face Switch (seconds)</div>
-                  <div className="grid grid-cols-3 gap-1 px-1">
+                  <div className="grid grid-cols-3 gap-1 px-1 mb-2">
                     {[3, 5, 8, 15, 30, 60].map(s => (
                       <button
                         key={s}
@@ -1069,6 +1108,25 @@ export default function App() {
                         {s}s
                       </button>
                     ))}
+                  </div>
+
+                  <div className="text-[9px] text-ascii-dim uppercase font-bold px-1 select-none border-b border-ascii-mid/10 pt-2 pb-1">MQTT Cloud Relay Key</div>
+                  <div className="px-1 flex flex-col gap-1">
+                    <input
+                      type="text"
+                      value={mqttKey}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setMqttKey(val);
+                        localStorage.setItem('mochi-mqtt-key', val);
+                      }}
+                      disabled={isConnected}
+                      className="w-full bg-ascii-dim/10 border border-ascii-mid/20 rounded px-2 py-1 text-ascii-bright font-mono text-[9px] focus:outline-none focus:border-[#e05f3e] disabled:opacity-50"
+                      placeholder="e.g. mochi_baotrq_relay"
+                    />
+                    <div className="text-[8px] text-ascii-dim leading-normal mt-0.5">
+                      Must match the suffix inside your ESP32's `secrets.h`.
+                    </div>
                   </div>
                 </div>
               )}

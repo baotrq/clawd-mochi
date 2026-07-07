@@ -96,6 +96,10 @@
 // ── BLE & Dual Serial Wrapper ─────────────────────────────────
 void initBLE();
 void bleSend(const String& msg);
+void initMQTT();
+void updateMQTT();
+void updateWiFiSync();
+void mqttPublishStatus(const String& msg);
 
 class DualSerialClass {
 public:
@@ -118,45 +122,66 @@ public:
   template<typename T>
   size_t print(T val) {
     size_t r = Serial.print(val);
-    bleSend(String(val));
+    String s = String(val);
+    bleSend(s);
+    mqttPublishStatus(s);
     return r;
   }
   
   size_t print(const char* val) {
     size_t r = Serial.print(val);
-    bleSend(String(val));
+    String s = String(val);
+    bleSend(s);
+    mqttPublishStatus(s);
     return r;
   }
 
   size_t print(const String& val) {
     size_t r = Serial.print(val);
     bleSend(val);
+    mqttPublishStatus(val);
     return r;
   }
 
   template<typename T>
   size_t println(T val) {
     size_t r = Serial.println(val);
-    bleSend(String(val) + "\n");
+    String s = String(val) + "\n";
+    bleSend(s);
+    mqttPublishStatus(s);
     return r;
   }
   
   size_t println(const char* val) {
     size_t r = Serial.println(val);
-    bleSend(String(val) + "\n");
+    String s = String(val) + "\n";
+    bleSend(s);
+    mqttPublishStatus(s);
     return r;
   }
 
   size_t println(const String& val) {
     size_t r = Serial.println(val);
-    bleSend(val + "\n");
+    String s = val + "\n";
+    bleSend(s);
+    mqttPublishStatus(s);
     return r;
   }
 
   size_t println() {
     size_t r = Serial.println();
     bleSend("\n");
+    mqttPublishStatus("\n");
     return r;
+  }
+
+  template<typename... Args>
+  void printf(const char* format, Args... args) {
+    Serial.printf(format, args...);
+    char buf[256];
+    snprintf(buf, sizeof(buf), format, args...);
+    bleSend(buf);
+    mqttPublishStatus(buf);
   }
 };
 
@@ -165,6 +190,7 @@ DualSerialClass DualSerial;
 
 // ── Forward Declarations ──────────────────────────────────────
 void handleChar(char c);
+void drawUsageView();
 void drawNormalEyes(int16_t ox = 0, bool blink = false, int16_t oy = 0);
 void drawEyesAsym(int16_t lxOff, int16_t lyOff, int16_t rxOff, int16_t ryOff, bool blink = false);
 void drawSquishEyes(bool closed = false);
@@ -548,6 +574,7 @@ static const int16_t LOGO_SEGS[][4] PROGMEM = {
 void setup() {
   Serial.begin(115200);
   initBLE();
+  initMQTT();
   randomSeed(esp_random());
 
   // Set the Vietnam (ICT, UTC+7) offset unconditionally, up front, via the
@@ -680,6 +707,8 @@ void loop() {
   while (Serial.available()) handleChar(Serial.read());
 
   updateWifiTime();
+  updateMQTT();
+  updateWiFiSync();
 
   checkAlarm();
   updateAlarmFlash();
