@@ -8,8 +8,15 @@ import {
   isSerialSupported,
   connectSerial,
   disconnectSerial,
-  writeSerial,
+  writeSerial as rawWriteSerial,
 } from './lib/serial.js'
+
+import {
+  isBluetoothSupported,
+  connectBluetooth,
+  disconnectBluetooth,
+  writeBluetooth,
+} from './lib/bluetooth.js'
 
 function removeVietnameseTones(str) {
   if (!str) return '';
@@ -119,6 +126,17 @@ const DEFAULT_HOTSPOTS = {
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false)
+  const [connectionType, setConnectionType] = useState('serial') // 'serial' | 'bluetooth'
+
+  const writeSerial = async (data) => {
+    if (connectionType === 'bluetooth') {
+      return await writeBluetooth(data)
+    } else {
+      return await rawWriteSerial(data)
+    }
+  }
+
+  const activeModeRef = useRef(null)
   const [activeMode, setActiveMode] = useState(null) // 'animation' | 'clock' | 'terminal' | null
   const [activeAlarm, setActiveAlarm] = useState(null) // { durationMins, endTime }
   const [activeTimer, setActiveTimer] = useState(null) // { durationSecs, endTime }
@@ -523,16 +541,29 @@ export default function App() {
 
   const handleConnect = async () => {
     if (isConnected) {
-      await disconnectSerial()
+      if (connectionType === 'bluetooth') {
+        await disconnectBluetooth()
+      } else {
+        await disconnectSerial()
+      }
       setIsConnected(false)
     } else {
       try {
-        await connectSerial(
-          // On disconnect
-          () => setIsConnected(false),
-          // On data received from ESP32
-          handleSerialData
-        )
+        if (connectionType === 'bluetooth') {
+          await connectBluetooth(
+            // On disconnect
+            () => setIsConnected(false),
+            // On data received from ESP32
+            handleSerialData
+          )
+        } else {
+          await connectSerial(
+            // On disconnect
+            () => setIsConnected(false),
+            // On data received from ESP32
+            handleSerialData
+          )
+        }
         setIsConnected(true)
 
         // Silently sync system time on connect — stays on whatever mode
@@ -898,7 +929,35 @@ export default function App() {
             clawd mochi
           </span>
 
-          {isSerialSupported() ? (
+          {/* Connection Type Toggle */}
+          {!isConnected && (
+            <div className="flex gap-1 bg-ascii-dim/10 border border-ascii-mid/20 rounded p-0.5 select-none font-mono text-[9px]">
+              <button
+                onClick={() => setConnectionType('serial')}
+                className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+                  connectionType === 'serial'
+                    ? 'bg-[#e05f3e] text-white font-bold'
+                    : 'text-ascii-mid hover:text-ascii-bright'
+                }`}
+                title="Use USB Serial Connection"
+              >
+                USB
+              </button>
+              <button
+                onClick={() => setConnectionType('bluetooth')}
+                className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+                  connectionType === 'bluetooth'
+                    ? 'bg-[#e05f3e] text-white font-bold'
+                    : 'text-ascii-mid hover:text-ascii-bright'
+                }`}
+                title="Use Bluetooth Wireless Connection"
+              >
+                BLE
+              </button>
+            </div>
+          )}
+
+          {((connectionType === 'serial' && isSerialSupported()) || (connectionType === 'bluetooth' && isBluetoothSupported())) ? (
             <button
               onClick={handleConnect}
               className={`flex items-center gap-2 px-2.5 py-1 rounded text-[10px] font-mono tracking-wider transition-all duration-300 border cursor-pointer ${
@@ -907,12 +966,12 @@ export default function App() {
                   : 'bg-ascii-dim/15 border-ascii-mid/20 text-ascii-mid hover:text-ascii-spark hover:border-ascii-bright/40'
               }`}
             >
-              <span className="text-[12px]">{isConnected ? '🔌' : '🔌'}</span>
-              <span>{isConnected ? 'SERIAL: CONNECTED' : 'CONNECT ESP32'}</span>
+              <span className="text-[12px]">{connectionType === 'bluetooth' ? '📡' : '🔌'}</span>
+              <span>{isConnected ? `${connectionType.toUpperCase()}: CONNECTED` : `CONNECT ${connectionType.toUpperCase()}`}</span>
             </button>
           ) : (
             <span className="text-[9px] text-red-400 bg-red-950/10 border border-red-900/20 px-2 py-0.5 rounded leading-none">
-              Web Serial Unsupported (Use Chrome/Edge)
+              {connectionType === 'serial' ? 'Web Serial Unsupported' : 'Web Bluetooth Unsupported'}
             </span>
           )}
         </div>

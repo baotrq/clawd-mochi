@@ -93,7 +93,78 @@
 #include "secrets.h"
 #define TZ_OFFSET_SEC (7 * 3600)   // Ho Chi Minh City, ICT, UTC+7, no DST
 
+// ── BLE & Dual Serial Wrapper ─────────────────────────────────
+void initBLE();
+void bleSend(const String& msg);
+
+class DualSerialClass {
+public:
+  void begin(unsigned long baud) {
+    Serial.begin(baud);
+  }
+  int available() {
+    return Serial.available();
+  }
+  int read() {
+    return Serial.read();
+  }
+  int peek() {
+    return Serial.peek();
+  }
+  void flush() {
+    Serial.flush();
+  }
+  
+  template<typename T>
+  size_t print(T val) {
+    size_t r = Serial.print(val);
+    bleSend(String(val));
+    return r;
+  }
+  
+  size_t print(const char* val) {
+    size_t r = Serial.print(val);
+    bleSend(String(val));
+    return r;
+  }
+
+  size_t print(const String& val) {
+    size_t r = Serial.print(val);
+    bleSend(val);
+    return r;
+  }
+
+  template<typename T>
+  size_t println(T val) {
+    size_t r = Serial.println(val);
+    bleSend(String(val) + "\n");
+    return r;
+  }
+  
+  size_t println(const char* val) {
+    size_t r = Serial.println(val);
+    bleSend(String(val) + "\n");
+    return r;
+  }
+
+  size_t println(const String& val) {
+    size_t r = Serial.println(val);
+    bleSend(val + "\n");
+    return r;
+  }
+
+  size_t println() {
+    size_t r = Serial.println();
+    bleSend("\n");
+    return r;
+  }
+};
+
+DualSerialClass DualSerial;
+#define Serial DualSerial
+
 // ── Forward Declarations ──────────────────────────────────────
+void handleChar(char c);
 void drawNormalEyes(int16_t ox = 0, bool blink = false, int16_t oy = 0);
 void drawEyesAsym(int16_t lxOff, int16_t lyOff, int16_t rxOff, int16_t ryOff, bool blink = false);
 void drawSquishEyes(bool closed = false);
@@ -476,6 +547,7 @@ static const int16_t LOGO_SEGS[][4] PROGMEM = {
 
 void setup() {
   Serial.begin(115200);
+  initBLE();
   randomSeed(esp_random());
 
   // Set the Vietnam (ICT, UTC+7) offset unconditionally, up front, via the
