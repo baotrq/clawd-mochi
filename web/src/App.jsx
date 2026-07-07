@@ -153,40 +153,7 @@ export default function App() {
     }
   }
 
-  const syncAlarmsToDevice = async (alarmsList) => {
-    if (!isConnected || !alarmsList || !Array.isArray(alarmsList)) return;
-    try {
-      await writeSerial('A C\n');
-      for (let i = 0; i < Math.min(10, alarmsList.length); i++) {
-        const alarm = alarmsList[i];
-        if (!alarm || !alarm.time || typeof alarm.time !== 'string') continue;
-        const enabledVal = alarm.enabled ? 1 : 0;
-        const parts = alarm.time.split(':');
-        if (parts.length < 2) continue;
-        const hh = parseInt(parts[0], 10);
-        const mm = parseInt(parts[1], 10);
-        if (isNaN(hh) || isNaN(mm)) continue;
-        
-        let daysByte = 0;
-        const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6];
-        days.forEach(d => {
-          daysByte |= (1 << d);
-        });
-        
-        const cleanName = removeVietnameseTones(alarm.name || '').substring(0, 20);
-        const cmd = `A S ${i} ${enabledVal} ${hh} ${mm} ${daysByte}${cleanName ? ' ' + cleanName : ''}\n`;
-        await writeSerial(cmd);
-      }
-    } catch (e) {
-      console.error('Failed to sync alarms to device:', e);
-    }
-  }
 
-  useEffect(() => {
-    if (isConnected) {
-      syncAlarmsToDevice(alarms);
-    }
-  }, [alarms, isConnected]);
 
   const activeModeRef = useRef(null)
   const [activeMode, setActiveMode] = useState(null) // 'animation' | 'clock' | 'terminal' | null
@@ -416,6 +383,41 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('mochi-alarms', JSON.stringify(alarms))
   }, [alarms])
+
+  const syncAlarmsToDevice = async (alarmsList) => {
+    if (!isConnected || !alarmsList || !Array.isArray(alarmsList)) return;
+    try {
+      await writeSerial('A C\n');
+      for (let i = 0; i < Math.min(10, alarmsList.length); i++) {
+        const alarm = alarmsList[i];
+        if (!alarm || !alarm.time || typeof alarm.time !== 'string') continue;
+        const enabledVal = alarm.enabled ? 1 : 0;
+        const parts = alarm.time.split(':');
+        if (parts.length < 2) continue;
+        const hh = parseInt(parts[0], 10);
+        const mm = parseInt(parts[1], 10);
+        if (isNaN(hh) || isNaN(mm)) continue;
+        
+        let daysByte = 0;
+        const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6];
+        days.forEach(d => {
+          daysByte |= (1 << d);
+        });
+        
+        const cleanName = removeVietnameseTones(alarm.name || '').substring(0, 20);
+        const cmd = `A S ${i} ${enabledVal} ${hh} ${mm} ${daysByte}${cleanName ? ' ' + cleanName : ''}\n`;
+        await writeSerial(cmd);
+      }
+    } catch (e) {
+      console.error('Failed to sync alarms to device:', e);
+    }
+  }
+
+  useEffect(() => {
+    if (isConnected) {
+      syncAlarmsToDevice(alarms);
+    }
+  }, [alarms, isConnected]);
 
   const getClosestAlarm = (alarmsList) => {
     if (!alarmsList || !Array.isArray(alarmsList)) return null
