@@ -154,13 +154,18 @@ export default function App() {
   }
 
   const syncAlarmsToDevice = async (alarmsList) => {
-    if (!isConnected) return;
+    if (!isConnected || !alarmsList || !Array.isArray(alarmsList)) return;
     try {
       await writeSerial('A C\n');
       for (let i = 0; i < Math.min(10, alarmsList.length); i++) {
         const alarm = alarmsList[i];
+        if (!alarm || !alarm.time || typeof alarm.time !== 'string') continue;
         const enabledVal = alarm.enabled ? 1 : 0;
-        const [hh, mm] = alarm.time.split(':').map(Number);
+        const parts = alarm.time.split(':');
+        if (parts.length < 2) continue;
+        const hh = parseInt(parts[0], 10);
+        const mm = parseInt(parts[1], 10);
+        if (isNaN(hh) || isNaN(mm)) continue;
         
         let daysByte = 0;
         const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6];
@@ -413,7 +418,8 @@ export default function App() {
   }, [alarms])
 
   const getClosestAlarm = (alarmsList) => {
-    const enabledAlarms = alarmsList.filter(a => a.enabled)
+    if (!alarmsList || !Array.isArray(alarmsList)) return null
+    const enabledAlarms = alarmsList.filter(a => a && a.enabled)
     if (enabledAlarms.length === 0) return null
 
     const now = new Date()
@@ -421,6 +427,7 @@ export default function App() {
     let minDiff = Infinity
 
     for (const alarm of enabledAlarms) {
+      if (!alarm || !alarm.time || typeof alarm.time !== 'string') continue
       const [hh, mm] = alarm.time.split(':').map(Number)
       const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6]
       
@@ -537,7 +544,7 @@ export default function App() {
           const cleanName = name === '-' ? '' : name
           
           setAlarms(prev => {
-            const next = [...prev]
+            const next = Array.isArray(prev) ? [...prev] : []
             while (next.length <= idx) {
               next.push({ id: Math.random().toString(36).substring(2, 9), name: '', time: '00:00', enabled: false, days: [] })
             }
@@ -549,10 +556,11 @@ export default function App() {
               days,
             }
             if (
-              next[idx]?.enabled !== nextAlarm.enabled ||
-              next[idx]?.time !== nextAlarm.time ||
-              next[idx]?.name !== nextAlarm.name ||
-              JSON.stringify(next[idx]?.days) !== JSON.stringify(nextAlarm.days)
+              !next[idx] ||
+              next[idx].enabled !== nextAlarm.enabled ||
+              next[idx].time !== nextAlarm.time ||
+              next[idx].name !== nextAlarm.name ||
+              JSON.stringify(next[idx].days) !== JSON.stringify(nextAlarm.days)
             ) {
               next[idx] = nextAlarm
               const filtered = next.filter(a => a)
