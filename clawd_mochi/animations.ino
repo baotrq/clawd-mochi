@@ -342,6 +342,438 @@ void animGlitchEyes() {
   busy = false;
 }
 
+void animLookUpDown() {
+  busy = true;
+  drawNormalEyes(0, false, -14); delay(speedMs(300));
+  drawNormalEyes(0, false, 14);  delay(speedMs(300));
+  drawNormalEyes(0, false, 0);   delay(speedMs(150));
+  busy = false;
+}
+
+void animGlanceBoth() {
+  busy = true;
+  drawNormalEyes(-20); delay(speedMs(220));
+  drawNormalEyes(0, true); delay(speedMs(80));
+  drawNormalEyes(20);  delay(speedMs(220));
+  drawNormalEyes(0, true); delay(speedMs(80));
+  drawNormalEyes(0, false);
+  busy = false;
+}
+
+void animWobble() {
+  busy = true;
+  const int16_t offs[] = {-4, 4, -4, 4, -2, 2, 0};
+  for (uint8_t i = 0; i < 7; i++) { drawNormalEyes(offs[i]); delay(speedMs(60)); }
+  busy = false;
+}
+
+void animBounce() {
+  busy = true;
+  const int16_t offs[] = {-10, 0, -6, 0, -3, 0};
+  for (uint8_t i = 0; i < 6; i++) { drawNormalEyes(0, false, offs[i]); delay(speedMs(70)); }
+  busy = false;
+}
+
+void animPeekBoth() {
+  busy = true;
+  drawNormalEyes(-34, false, 0); delay(speedMs(300));
+  delay(speedMs(200));
+  drawNormalEyes(0); delay(speedMs(120));
+  drawNormalEyes(34, false, 0);  delay(speedMs(300));
+  delay(speedMs(200));
+  drawNormalEyes(0); delay(speedMs(120));
+  busy = false;
+}
+
+void animSlowBlink() {
+  busy = true;
+  for (int16_t h = EYE_H; h >= 6; h -= 4) { drawDroopyEyes(h); delay(speedMs(30)); }
+  delay(speedMs(250));
+  for (int16_t h = 6; h <= EYE_H; h += 4) { drawDroopyEyes(h); delay(speedMs(30)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+void animTripleBlink() {
+  busy = true;
+  for (uint8_t i = 0; i < 3; i++) {
+    drawNormalEyes(0, true);  delay(speedMs(70));
+    drawNormalEyes(0, false); delay(speedMs(80));
+  }
+  busy = false;
+}
+
+void animWinkBothSeq() {
+  busy = true;
+  drawWinkEyes(true);  delay(speedMs(180));
+  drawNormalEyes();     delay(speedMs(100));
+  drawWinkEyes(false); delay(speedMs(180));
+  drawNormalEyes();
+  busy = false;
+}
+
+void animTiltBothHold() {
+  busy = true;
+  drawEyesAsym(0, -12, 0, 12); delay(speedMs(400));
+  drawEyesAsym(0, 12, 0, -12); delay(speedMs(400));
+  drawNormalEyes();
+  busy = false;
+}
+
+void animAlert() {
+  busy = true;
+  for (int16_t h = EYE_H; h <= EYE_H + 20; h += 10) { drawDroopyEyes(h); delay(speedMs(20)); }
+  delay(speedMs(200));
+  for (int16_t h = EYE_H + 20; h >= EYE_H; h -= 10) { drawDroopyEyes(h); delay(speedMs(20)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+void animAnnoyed() {
+  busy = true;
+  for (int16_t h = EYE_H; h >= EYE_H / 4; h -= 8) { drawDroopyEyes(h); delay(speedMs(18)); }
+  delay(speedMs(400));
+  for (int16_t h = EYE_H / 4; h <= EYE_H; h += 8) { drawDroopyEyes(h); delay(speedMs(18)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+void animYawn() {
+  busy = true;
+  for (int16_t h = EYE_H; h >= 4; h -= 4) { drawDroopyEyes(h); delay(speedMs(35)); }
+  delay(speedMs(400));
+  const int16_t offs[] = {-6, 6, 0};
+  for (uint8_t i = 0; i < 3; i++) { drawNormalEyes(offs[i]); delay(speedMs(70)); }
+  busy = false;
+}
+
+void animEyesWiden() {
+  busy = true;
+  drawEyesAsym(-8, 0, 8, 0);  delay(speedMs(300));
+  drawNormalEyes();
+  busy = false;
+}
+
+void animEyesSqueeze() {
+  busy = true;
+  drawEyesAsym(6, 0, -6, 0);  delay(speedMs(300));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Simple 8-point asterisk star, same monochrome-line style as drawCrossEye.
+void drawStarEye(int16_t cx, int16_t cy) {
+  for (int8_t t = -1; t <= 1; t++) {
+    tft.drawLine(cx - 14, cy + t, cx + 14, cy + t, C_BLACK);
+    tft.drawLine(cx + t, cy - 14, cx + t, cy + 14, C_BLACK);
+    tft.drawLine(cx - 10 + t, cy - 10, cx + 10 + t, cy + 10, C_BLACK);
+    tft.drawLine(cx - 10, cy - 10 + t, cx + 10, cy + 10 + t, C_BLACK);
+  }
+}
+
+void animStarEyes() {
+  busy = true;
+  tft.fillScreen(animBgColor);
+  drawStarEye(eyeLX(0) + EYE_W / 2, eyeCY());
+  drawStarEye(eyeRX(0) + EYE_W / 2, eyeCY());
+  delay(speedMs(500));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Dazed/KO look — static X eyes held (unlike animDizzyEyes, which jitters).
+void animKOEyes() {
+  busy = true;
+  tft.fillScreen(animBgColor);
+  drawCrossEye(eyeLX(0), eyeY());
+  drawCrossEye(eyeRX(0), eyeY());
+  delay(speedMs(600));
+  drawNormalEyes();
+  busy = false;
+}
+
+void animHypnoReverse() {
+  busy = true;
+  for (uint8_t i = 24; i > 0; i--) {
+    drawHypnoEyesView(i);
+    delay(speedMs(60));
+  }
+  drawNormalEyes();
+  busy = false;
+}
+
+void animGlitchIntense() {
+  busy = true;
+  for (uint8_t i = 0; i < 14; i++) {
+    drawGlitchEyesView();
+    delay(speedMs(45));
+  }
+  drawNormalEyes();
+  busy = false;
+}
+
+// Thin scan line sweeping down through closed-look eye sockets, like a
+// scanner pass — same fillRect-block style as the rest of the eye views.
+void drawScanEyesView(int16_t lineY) {
+  const int16_t lx = eyeLX(0), rx = eyeRX(0), ey = eyeY();
+  tft.fillScreen(animBgColor);
+  tft.fillRect(lx, ey, EYE_W, EYE_H, C_BLACK);
+  tft.fillRect(rx, ey, EYE_W, EYE_H, C_BLACK);
+  uint16_t scanCol = tft.color565(255, 255, 255);
+  tft.fillRect(lx, ey + lineY, EYE_W, 3, scanCol);
+  tft.fillRect(rx, ey + lineY, EYE_W, 3, scanCol);
+}
+
+void animScanEyes() {
+  busy = true;
+  for (int16_t y = 0; y <= EYE_H - 3; y += 5) { drawScanEyesView(y); delay(speedMs(30)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+void animPowerOn() {
+  busy = true;
+  drawNormalEyes(0, true); delay(speedMs(300));
+  for (int16_t h = 6; h <= EYE_H; h += 4) { drawDroopyEyes(h); delay(speedMs(25)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+void animPowerOff() {
+  busy = true;
+  for (int16_t h = EYE_H; h >= 6; h -= 4) { drawDroopyEyes(h); delay(speedMs(25)); }
+  drawNormalEyes(0, true); delay(speedMs(400));
+  drawNormalEyes();
+  busy = false;
+}
+
+void animThinking() {
+  busy = true;
+  drawNormalEyes(-10, false, -10); delay(speedMs(300));
+  drawNormalEyes(10, false, -10);  delay(speedMs(300));
+  drawNormalEyes(0);
+  busy = false;
+}
+
+void animAlarmedShake() {
+  busy = true;
+  for (int16_t h = EYE_H; h <= EYE_H + 16; h += 8) { drawDroopyEyes(h); delay(speedMs(25)); }
+  const int16_t offs[] = {-8, 8, -8, 8, 0};
+  for (uint8_t i = 0; i < 5; i++) { drawNormalEyes(offs[i]); delay(speedMs(50)); }
+  busy = false;
+}
+
+void animFigureEight() {
+  busy = true;
+  const int16_t path[][2] = {
+    {0, 0}, {10, -8}, {0, -14}, {-10, -8}, {0, 0},
+    {10, 8}, {0, 14}, {-10, 8}, {0, 0},
+  };
+  for (uint8_t i = 0; i < 9; i++) { drawNormalEyes(path[i][0], false, path[i][1]); delay(speedMs(65)); }
+  busy = false;
+}
+
+void animFlutter() {
+  busy = true;
+  for (uint8_t i = 0; i < 5; i++) {
+    drawNormalEyes(0, true);  delay(speedMs(45));
+    drawNormalEyes(0, false); delay(speedMs(50));
+  }
+  busy = false;
+}
+
+void animDrift() {
+  busy = true;
+  const int16_t path[][2] = {
+    {0, -10}, {8, -7}, {12, 0}, {8, 7}, {0, 10},
+    {-8, 7}, {-12, 0}, {-8, -7}, {0, 0},
+  };
+  for (uint8_t i = 0; i < 9; i++) { drawNormalEyes(path[i][0], false, path[i][1]); delay(speedMs(100)); }
+  busy = false;
+}
+
+// Angry brows — cut the inner-top corner of each eye box inward/down (mirror
+// of drawCryEyesView's outer-corner cut for sad), giving a furrowed "><" look.
+void drawAngryEyesView(int16_t ox) {
+  tft.fillScreen(animBgColor);
+  const int16_t lx = eyeLX(ox), rx = eyeRX(ox), ey = eyeY();
+  tft.fillRect(lx, ey, EYE_W, EYE_H, C_BLACK);
+  tft.fillRect(rx, ey, EYE_W, EYE_H, C_BLACK);
+  // Left eye's inner corner is its top-right; right eye's inner corner is its top-left.
+  tft.fillTriangle(lx + EYE_W - 16, ey, lx + EYE_W, ey, lx + EYE_W, ey + 16, animBgColor);
+  tft.fillTriangle(rx, ey, rx + 16, ey, rx, ey + 16, animBgColor);
+}
+
+void animAngry() {
+  busy = true;
+  const int16_t offs[] = {-3, 3, -3, 3, 0};
+  for (uint8_t i = 0; i < 5; i++) { drawAngryEyesView(offs[i]); delay(speedMs(70)); }
+  delay(speedMs(300));
+  drawNormalEyes();
+  busy = false;
+}
+
+void animFurious() {
+  busy = true;
+  const int16_t offs[] = {-6, 6, -6, 6, -6, 6, 0};
+  for (uint8_t i = 0; i < 7; i++) { drawAngryEyesView(offs[i]); delay(speedMs(45)); }
+  delay(speedMs(350));
+  drawNormalEyes();
+  busy = false;
+}
+
+// One eye normal, one eye winked — a knowing/smug look (distinct from
+// animWink, which winks a random single eye then immediately returns).
+void animSmug() {
+  busy = true;
+  drawWinkEyes(random(2) == 0); delay(speedMs(600));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Tilt one way while glancing that way, like sizing something up.
+void animCurious() {
+  busy = true;
+  drawEyesAsym(-4, -8, -4, 8); delay(speedMs(280));
+  drawEyesAsym(4, 8, 4, -8);   delay(speedMs(280));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Wink + a little bounce — a playful, "got your attention" reaction.
+void animPlayful() {
+  busy = true;
+  drawWinkEyes(true);              delay(speedMs(150));
+  drawNormalEyes(0, false, -8);     delay(speedMs(90));
+  drawNormalEyes(0, false, 0);      delay(speedMs(90));
+  drawWinkEyes(false);             delay(speedMs(150));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Peaceful, eyes-closed-and-happy hold (longer than a regular squish blink).
+void animContent() {
+  busy = true;
+  drawSquishEyes(false); delay(speedMs(180));
+  drawSquishEyes(true);  delay(speedMs(600));
+  drawSquishEyes(false);
+  busy = false;
+}
+
+// Sad, droopy-cornered eyes held without tears (compare animCryEyes, which
+// adds the static tear streaks) — reuses the same corner-slant eye shape.
+void animSad() {
+  busy = true;
+  tft.fillScreen(animBgColor);
+  drawCryEyesView(false); delay(speedMs(500));
+  drawCryEyesView(true);  delay(speedMs(150));
+  drawCryEyesView(false); delay(speedMs(300));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Narrowed eyes + a nervous wobble.
+void animWorried() {
+  busy = true;
+  const int16_t offs[] = {-3, 3, -3, 3, -3, 3, 0};
+  for (uint8_t i = 0; i < 7; i++) { drawEyesAsym(offs[i] - 5, 0, offs[i] + 5, 0); delay(speedMs(55)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+// Rapid blink+bounce together — a giggling, can't-hold-still reaction.
+void animLaughing() {
+  busy = true;
+  const int16_t offs[] = {-8, 0, -8, 0, -8, 0};
+  for (uint8_t i = 0; i < 6; i++) {
+    drawNormalEyes(0, i % 2 == 0, offs[i]);
+    delay(speedMs(55));
+  }
+  drawNormalEyes();
+  busy = false;
+}
+
+// Widen and hold, chest-out confident stare (compare animAlert, which snaps
+// back quickly — this one holds the wide-eyed look).
+void animConfident() {
+  busy = true;
+  for (int16_t h = EYE_H; h <= EYE_H + 16; h += 8) { drawDroopyEyes(h); delay(speedMs(25)); }
+  delay(speedMs(450));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Small downward look + slow blink — bashful/shy.
+void animShy() {
+  busy = true;
+  drawNormalEyes(0, false, 10); delay(speedMs(250));
+  drawNormalEyes(0, true, 10);  delay(speedMs(180));
+  drawNormalEyes(0, false, 10); delay(speedMs(250));
+  drawNormalEyes(0);
+  busy = false;
+}
+
+// Narrow eyes drifting slowly side to side — sizing something up.
+void animSuspicious() {
+  busy = true;
+  for (int16_t h = EYE_H; h >= EYE_H / 3; h -= 10) { drawDroopyEyes(h); delay(speedMs(25)); }
+  const int16_t offs[] = {-12, 12, -12, 12, 0};
+  for (uint8_t i = 0; i < 5; i++) { drawNormalEyes(offs[i]); delay(speedMs(140)); }
+  busy = false;
+}
+
+// Surprised pop straight into a glitch flicker — a startled malfunction.
+void animShock() {
+  busy = true;
+  for (int16_t h = EYE_H; h <= EYE_H + 24; h += 8) { drawDroopyEyes(h); delay(speedMs(25)); }
+  for (uint8_t i = 0; i < 6; i++) { drawGlitchEyesView(); delay(speedMs(50)); }
+  drawNormalEyes();
+  busy = false;
+}
+
+// Stuttering double bounce+blink, like a hiccup.
+void animHiccup() {
+  busy = true;
+  for (uint8_t i = 0; i < 2; i++) {
+    drawNormalEyes(0, false, -10); delay(speedMs(60));
+    drawNormalEyes(0, true, 0);    delay(speedMs(70));
+    drawNormalEyes(0, false, 0);   delay(speedMs(90));
+  }
+  busy = false;
+}
+
+// Slow squint build-up then a sudden wide-eyed pop with a shake — a sneeze.
+void animSneeze() {
+  busy = true;
+  for (int16_t h = EYE_H; h >= EYE_H / 4; h -= 6) { drawDroopyEyes(h); delay(speedMs(30)); }
+  delay(speedMs(200));
+  for (int16_t h = EYE_H / 4; h <= EYE_H + 20; h += 10) { drawDroopyEyes(h); delay(speedMs(20)); }
+  const int16_t offs[] = {-6, 6, -6, 6, 0};
+  for (uint8_t i = 0; i < 5; i++) { drawNormalEyes(offs[i]); delay(speedMs(45)); }
+  busy = false;
+}
+
+// Look down + a tiny shake + blink — embarrassed/awkward.
+void animAwkward() {
+  busy = true;
+  drawNormalEyes(0, false, 8); delay(speedMs(200));
+  const int16_t offs[] = {-4, 4, 0};
+  for (uint8_t i = 0; i < 3; i++) { drawNormalEyes(offs[i], false, 8); delay(speedMs(70)); }
+  drawNormalEyes(0, true, 8); delay(speedMs(100));
+  drawNormalEyes();
+  busy = false;
+}
+
+// Angry brows held still and long, no shake, ending in a slow blink —
+// grumpy rather than actively furious (compare animAngry/animFurious).
+void animGrumpy() {
+  busy = true;
+  drawAngryEyesView(0); delay(speedMs(700));
+  drawNormalEyes(0, true); delay(speedMs(120));
+  drawNormalEyes();
+  busy = false;
+}
+
 // Idle animations cycled by dynamic mode — weighted toward the quick ones
 void (*const IDLE_ANIMS[])() = {
   animNormalEyes, animNormalEyes,
@@ -366,8 +798,124 @@ void (*const IDLE_ANIMS[])() = {
   animHypnoEyes,
   animCryEyes,
   animNekoEyes,
+  animLookUpDown,
+  animGlanceBoth,
+  animWobble,
+  animBounce,
+  animPeekBoth,
+  animSlowBlink,
+  animTripleBlink,
+  animWinkBothSeq,
+  animTiltBothHold,
+  animAlert,
+  animAnnoyed,
+  animYawn,
+  animEyesWiden,
+  animEyesSqueeze,
+  animStarEyes,
+  animKOEyes,
+  animHypnoReverse,
+  animGlitchIntense,
+  animScanEyes,
+  animPowerOn,
+  animPowerOff,
+  animThinking,
+  animAlarmedShake,
+  animFigureEight,
+  animFlutter,
+  animDrift,
+  animAngry,
+  animFurious,
+  animSmug,
+  animCurious,
+  animPlayful,
+  animContent,
+  animSad,
+  animWorried,
+  animLaughing,
+  animConfident,
+  animShy,
+  animSuspicious,
+  animShock,
+  animHiccup,
+  animSneeze,
+  animAwkward,
+  animGrumpy,
 };
 const uint8_t IDLE_ANIM_COUNT = sizeof(IDLE_ANIMS) / sizeof(IDLE_ANIMS[0]);
+
+// Parallel to IDLE_ANIMS[] (same order, same length) — used only by the 'D'
+// debug/validation command (mode_switching.ino) to echo which animation an
+// index played. Keep in lockstep with IDLE_ANIMS[] whenever it changes.
+const char* const IDLE_ANIM_NAMES[] = {
+  "animNormalEyes", "animNormalEyes",
+  "animBlink", "animBlink",
+  "animDoubleBlink",
+  "animSquishEyes",
+  "animLookAround",
+  "animWink",
+  "animSleepy",
+  "animSurprised",
+  "animSquint",
+  "animNod",
+  "animShake",
+  "animRoll",
+  "animCrossEyed",
+  "animTiltConfused",
+  "animExcited",
+  "animLogoReveal",
+  "animHeartEyes",
+  "animDizzyEyes",
+  "animGlitchEyes",
+  "animHypnoEyes",
+  "animCryEyes",
+  "animNekoEyes",
+  "animLookUpDown",
+  "animGlanceBoth",
+  "animWobble",
+  "animBounce",
+  "animPeekBoth",
+  "animSlowBlink",
+  "animTripleBlink",
+  "animWinkBothSeq",
+  "animTiltBothHold",
+  "animAlert",
+  "animAnnoyed",
+  "animYawn",
+  "animEyesWiden",
+  "animEyesSqueeze",
+  "animStarEyes",
+  "animKOEyes",
+  "animHypnoReverse",
+  "animGlitchIntense",
+  "animScanEyes",
+  "animPowerOn",
+  "animPowerOff",
+  "animThinking",
+  "animAlarmedShake",
+  "animFigureEight",
+  "animFlutter",
+  "animDrift",
+  "animAngry",
+  "animFurious",
+  "animSmug",
+  "animCurious",
+  "animPlayful",
+  "animContent",
+  "animSad",
+  "animWorried",
+  "animLaughing",
+  "animConfident",
+  "animShy",
+  "animSuspicious",
+  "animShock",
+  "animHiccup",
+  "animSneeze",
+  "animAwkward",
+  "animGrumpy",
+};
+static_assert(sizeof(IDLE_ANIM_NAMES) / sizeof(IDLE_ANIM_NAMES[0]) == sizeof(IDLE_ANIMS) / sizeof(IDLE_ANIMS[0]),
+              "IDLE_ANIM_NAMES must have one entry per IDLE_ANIMS entry, same order");
 
 void playRandomIdleAnim() {
   IDLE_ANIMS[random(IDLE_ANIM_COUNT)]();

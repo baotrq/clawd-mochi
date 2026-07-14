@@ -121,6 +121,7 @@ export default function ControlPanel({
   weatherData,
   alarms = [],
   setAlarms,
+  onSyncAlarms,
   selectedLocation,
   recentLocations = [],
   onLocationChange,
@@ -144,6 +145,7 @@ export default function ControlPanel({
   const [alarmNameStr, setAlarmNameStr] = useState('')
   const [alarmDays, setAlarmDays] = useState([1, 2, 3, 4, 5]) // Default to weekdays (Mon-Fri)
   const [editingAlarmIndex, setEditingAlarmIndex] = useState(null)
+  const [alarmSyncStatus, setAlarmSyncStatus] = useState(null) // null | 'syncing' | 'ok' | 'error'
   const [clockHourStr, setClockHourStr] = useState('')
   const [clockMinuteStr, setClockMinuteStr] = useState('')
   const [terminalInput, setTerminalInput] = useState('')
@@ -727,8 +729,24 @@ export default function ControlPanel({
 
               {/* Saved Alarms Manager */}
               <div className="space-y-2 pt-2 border-t border-ascii-mid/10">
-                <div className="text-[10px] text-ascii-mid uppercase font-bold tracking-wider">
-                  Alarms List
+                <div className="flex justify-between items-center">
+                  <div className="text-[10px] text-ascii-mid uppercase font-bold tracking-wider">
+                    Alarms List
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!isConnected || alarmSyncStatus === 'syncing'}
+                    onClick={async () => {
+                      setAlarmSyncStatus('syncing')
+                      const ok = await onSyncAlarms()
+                      setAlarmSyncStatus(ok ? 'ok' : 'error')
+                      setTimeout(() => setAlarmSyncStatus(null), 2500)
+                    }}
+                    className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-ascii-mid/30 text-ascii-mid hover:text-ascii-spark hover:border-ascii-bright/50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="Push this alarm list to the device"
+                  >
+                    {alarmSyncStatus === 'syncing' ? 'Syncing…' : alarmSyncStatus === 'ok' ? 'Synced ✓' : alarmSyncStatus === 'error' ? 'Sync failed' : 'Sync to Device'}
+                  </button>
                 </div>
                 {alarms.length === 0 ? (
                   <div className="text-[10px] text-ascii-mid italic">No alarms saved</div>

@@ -42,6 +42,9 @@
  *         without switching modes or drawing anything — sent by the web
  *         app right after connecting, so the device stays on whatever
  *         it's currently showing (default Animation) while it syncs
+ *     D = debug: play IDLE_ANIMS[index] on demand (digits + Enter, e.g.
+ *         D24\n) and echo its name — for validating new idle animations
+ *         over the Serial Monitor without waiting for dynamicMode's cycle
  *
  *   ── ANIMATION MODE ────────────────────────────────────────────
  *     w = normal eyes   s = squish eyes   z = logo reveal
@@ -369,6 +372,10 @@ String    inputBuf  = "";
 uint16_t idleIntervalSec = 8;   // gap between idle eye animations (web-configurable)
 bool     collectingIdleInterval = false;
 String   idleBuf            = "";
+// Debug/validation only: 'D' + index + Enter plays IDLE_ANIMS[index] on
+// demand (see mode_switching.ino, animations.ino for IDLE_ANIMS/NAMES).
+bool     collectingAnimTest = false;
+String   animTestBuf        = "";
 bool     collectingUsage     = false;
 String   usageBuf            = "";
 int8_t   usageSessionPct     = -1; // -1 = no data yet

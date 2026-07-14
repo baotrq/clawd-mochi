@@ -27,7 +27,10 @@
 
 enum WifiTimeState { WT_IDLE, WT_CONNECTING, WT_WAITING_NTP };
 WifiTimeState wifiTimeState   = WT_IDLE;
-uint32_t      wifiTimeStateAt = 0;
+// Underflows on purpose: makes the very first `millis() - wifiTimeStateAt`
+// check in WT_IDLE true immediately, so boot doesn't wait a full
+// WIFI_RETRY_INTERVAL_MS (5 min) before the first connect attempt.
+uint32_t      wifiTimeStateAt = 0 - WIFI_RETRY_INTERVAL_MS;
 
 void startWifiConnect() {
   WiFi.mode(WIFI_STA);

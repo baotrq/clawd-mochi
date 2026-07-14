@@ -384,10 +384,17 @@ export default function App() {
     localStorage.setItem('mochi-alarms', JSON.stringify(alarms))
   }, [alarms])
 
+  // Push the full alarm list to the device. Only call this from an explicit
+  // user action (a "Sync to Device" click), not automatically on every edit
+  // or on connect — auto-pushing on connect used to race the 'Q' readback
+  // below and could clobber the device's real alarms with a stale browser's
+  // localStorage copy. The device stages "A C"/"A S" writes in RAM and only
+  // commits to flash on "A E", so a write failure partway through (flaky
+  // BLE/WiFi) aborts before committing instead of leaving flash cleared.
   const syncAlarmsToDevice = async (alarmsList) => {
-    if (!isConnected || !alarmsList || !Array.isArray(alarmsList)) return;
+    if (!isConnected || !alarmsList || !Array.isArray(alarmsList)) return false;
     try {
-      await writeSerial('A C\n');
+      if (!(await writeSerial('A C\n'))) throw new Error('write failed on A C');
       for (let i = 0; i < Math.min(10, alarmsList.length); i++) {
         const alarm = alarmsList[i];
         if (!alarm || !alarm.time || typeof alarm.time !== 'string') continue;
@@ -397,27 +404,24 @@ export default function App() {
         const hh = parseInt(parts[0], 10);
         const mm = parseInt(parts[1], 10);
         if (isNaN(hh) || isNaN(mm)) continue;
-        
+
         let daysByte = 0;
         const days = alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6];
         days.forEach(d => {
           daysByte |= (1 << d);
         });
-        
+
         const cleanName = removeVietnameseTones(alarm.name || '').substring(0, 20);
         const cmd = `A S ${i} ${enabledVal} ${hh} ${mm} ${daysByte}${cleanName ? ' ' + cleanName : ''}\n`;
-        await writeSerial(cmd);
+        if (!(await writeSerial(cmd))) throw new Error(`write failed on alarm ${i}`);
       }
+      if (!(await writeSerial('A E\n'))) throw new Error('write failed on A E');
+      return true;
     } catch (e) {
-      console.error('Failed to sync alarms to device:', e);
+      console.error('Failed to sync alarms to device (not committed):', e);
+      return false;
     }
   }
-
-  useEffect(() => {
-    if (isConnected) {
-      syncAlarmsToDevice(alarms);
-    }
-  }, [alarms, isConnected]);
 
   const getClosestAlarm = (alarmsList) => {
     if (!alarmsList || !Array.isArray(alarmsList)) return null
@@ -1042,6 +1046,7 @@ export default function App() {
         weatherData={weatherData}
         alarms={alarms}
         setAlarms={setAlarms}
+        onSyncAlarms={() => syncAlarmsToDevice(alarms)}
         selectedLocation={selectedLocation}
         recentLocations={recentLocations}
         onLocationChange={handleLocationChange}

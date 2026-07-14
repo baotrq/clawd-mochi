@@ -87,6 +87,8 @@ in terminal: type "exit" + Enter to leave
 
 Note: the `e`–`x` single-shot expression commands were added in addition to the original set; each maps directly to an existing `anim*()` function and works over Serial (there is no other route — see above).
 
+Note: `D<index>` + Enter (e.g. `D24\n`) is a debug/validation-only global command — plays `IDLE_ANIMS[index]` (`animations.ino`) on demand and echoes its name from the parallel `IDLE_ANIM_NAMES[]`, so a newly added idle animation can be checked over the Serial Monitor without waiting for `dynamicMode`'s random cycle to land on it.
+
 ## Conventions & constraints
 
 - **Keep it one sketch (the `clawd_mochi/` folder), no classes/translation units.** The code is split across multiple `.ino` files for readability, but the Arduino IDE concatenates them into a single build — there is still only one thing to open and flash (`clawd_mochi.ino`), matching the README's promise of an easy beginner flash. Don't introduce `.h`/`.cpp` files or OOP-style modularization; new code should be a new `.ino` file in the same folder, or added to an existing one. **Exception:** `secrets.h` (gitignored, `#include`d for `STA_SSID`/`STA_PASS`) — a plain data header for credentials, not logic, so it doesn't fall under this rule. If more secrets/API keys are ever needed, add `#define`s to that same file rather than creating new headers.

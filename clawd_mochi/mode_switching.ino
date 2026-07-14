@@ -146,8 +146,15 @@ void handleChar(char c) {
             alarmsList[i].days = 0;
             memset(alarmsList[i].name, 0, sizeof(alarmsList[i].name));
           }
+          Serial.println("Alarms cleared (staged, send E to commit).");
+        } else if (alarmsBuf.startsWith("E")) {
+          // Commit whatever's currently staged in alarmsList to flash in one
+          // write. A full "A C" + "A S ..." x N + "A E" resync only persists
+          // if the whole sequence lands — a drop mid-sequence (flaky
+          // BLE/WiFi) leaves flash on its last good state instead of
+          // silently wiping stored alarms.
           saveAlarmsToFlash();
-          Serial.println("Alarms cleared.");
+          Serial.println("Alarms committed to flash.");
         } else if (alarmsBuf.startsWith("S ")) {
           String params = alarmsBuf.substring(2);
           int firstSpace = params.indexOf(' ');
@@ -180,9 +187,8 @@ void handleChar(char c) {
               if (name.length() > 23) name = name.substring(0, 23);
               memset(alarmsList[idx].name, 0, sizeof(alarmsList[idx].name));
               memcpy(alarmsList[idx].name, name.c_str(), name.length());
-              
-              saveAlarmsToFlash();
-              Serial.printf("Alarm [%d] set: %02d:%02d, Days: %d, Name: %s\n", idx, hour, minute, days, alarmsList[idx].name);
+
+              Serial.printf("Alarm [%d] staged: %02d:%02d, Days: %d, Name: %s\n", idx, hour, minute, days, alarmsList[idx].name);
             }
           }
         }
@@ -324,6 +330,27 @@ void handleChar(char c) {
     return;
   }
 
+  // Debug/validation only: 'D' + index + Enter plays that IDLE_ANIMS[] entry
+  // immediately (any mode, any time), echoing its name — so a new animation
+  // can be checked over the Serial Monitor without waiting for dynamicMode's
+  // random idle-cycle to land on it.
+  if (collectingAnimTest) {
+    if (c == '\n' || c == '\r') {
+      int idx = animTestBuf.toInt();
+      if (idx >= 0 && idx < IDLE_ANIM_COUNT) {
+        Serial.printf("Playing anim [%d]: %s\n", idx, IDLE_ANIM_NAMES[idx]);
+        IDLE_ANIMS[idx]();
+      } else {
+        Serial.printf("Index out of range. Valid: 0-%d\n", IDLE_ANIM_COUNT - 1);
+      }
+      collectingAnimTest = false;
+      animTestBuf = "";
+    } else if (c >= '0' && c <= '9') {
+      animTestBuf += c;
+    }
+    return;
+  }
+
   if (collectingClockSet) {
     if (c == '\n' || c == '\r') {
       if (clockSetBuf.length() >= 10) {
@@ -442,6 +469,7 @@ void handleChar(char c) {
     case 'W': wxCollecting = true; wxBuf = ""; return;
     case 'I': collectingIdleInterval = true; idleBuf = ""; return;
     case 'A': collectingAlarms = true; alarmsBuf = ""; return;
+    case 'D': collectingAnimTest = true; animTestBuf = ""; return;
     case 'Q':
       if (currentMode == MODE_ANIMATION) Serial.println("MODE:ANIMATION");
       else if (currentMode == MODE_CLOCK) Serial.println("MODE:CLOCK");
