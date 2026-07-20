@@ -3,11 +3,13 @@ import RoomScene from './components/RoomScene.jsx'
 import Clawd from './components/Clawd.jsx'
 import HotspotOverlay from './components/HotspotOverlay.jsx'
 import ControlPanel from './components/ControlPanel.jsx'
+import { LEAGUE_GROUPS, MAX_FAVORITE_TEAMS } from './lib/leagues.js'
 
 import {
   isSerialSupported,
   connectSerial,
   disconnectSerial,
+  tryAutoConnectSerial,
   writeSerial as rawWriteSerial,
 } from './lib/serial.js'
 
@@ -127,6 +129,14 @@ const DEFAULT_HOTSPOTS = {
     mode: 'sing',
     cmd: '7',
     label: 'Music Box (Sing Mode)',
+  },
+  scores: {
+    x: 0.1755,
+    y: 0.2021,
+    r: 0.05,
+    mode: 'scores',
+    cmd: '8',
+    label: 'Scores (Live Sports Scores)',
   },
 }
 
@@ -298,6 +308,83 @@ export default function App() {
     ]
   })
 
+  // Favorite teams (Scores mode, MODE_SCORES on the device) — picked from
+  // real rosters (LEAGUE_GROUPS above), pushed to the ESP32 via 'F', which
+  // pins a live game involving one of these teams instead of rotating past
+  // it. Device fetches the actual scores itself; the web app's only job
+  // here is telling it who to prioritize.
+  const [favoriteTeams, setFavoriteTeams] = useState(() => {
+    const saved = localStorage.getItem('mochi-favorite-teams')
+    if (saved) {
+      try {
+        return JSON.parse(saved)
+      } catch (e) {}
+    }
+    return []
+  })
+  // Draft selection for the picker — only pushed to the device on explicit
+  // Save, so toggling checkboxes doesn't spam Serial writes.
+  const [favTeamsDraft, setFavTeamsDraft] = useState(() => favoriteTeams)
+
+  // Team rosters for the picker, loaded one league at a time (on dropdown
+  // selection, not all 12 eagerly) and cached 24h in localStorage —
+  // { [code]: { teams, fetchedAt } }. football-data/balldontlie both
+  // reject direct browser calls (no CORS headers), so these go through the
+  // Vite dev-server proxy (see vite.config.js) instead of hitting the APIs
+  // directly — same fix already applied for the Claude usage API.
+  const [leagueTeams, setLeagueTeams] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('mochi-league-teams-cache-v2') || '{}')
+      // Guard against a malformed/older-format cache (e.g. code changed
+      // shape) silently leaking teams under the wrong league — every value
+      // must be a real { teams: [...] } entry or it gets dropped.
+      const clean = {}
+      for (const [code, entry] of Object.entries(parsed)) {
+        if (entry && Array.isArray(entry.teams)) clean[code] = entry
+      }
+      return clean
+    } catch (e) {
+      return {}
+    }
+  })
+  const [loadingLeague, setLoadingLeague] = useState(null) // league code currently loading, or null
+
+  const fetchFootballDataTeams = async (code) => {
+    const r = await fetch(`/api/football-teams?code=${code}`)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const d = await r.json()
+    return (d.teams || []).map(t => t.name).sort()
+  }
+
+  const fetchNbaTeams = async () => {
+    const r = await fetch('/api/nba-teams')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const d = await r.json()
+    return (d.data || []).map(t => t.full_name).sort()
+  }
+
+  const loadTeamsForLeague = async (code) => {
+    const cached = leagueTeams[code]
+    if ((cached && Date.now() - cached.fetchedAt < 24 * 3600 * 1000) || loadingLeague === code) return
+    const group = LEAGUE_GROUPS.find(g => g.code === code)
+    if (!group) return
+    setLoadingLeague(code)
+    let teams = []
+    try {
+      if (group.source === 'football-data') teams = await fetchFootballDataTeams(code)
+      else if (group.source === 'balldontlie') teams = await fetchNbaTeams()
+      else teams = group.teams
+    } catch (err) {
+      console.error(`Failed to load teams for ${group.label}:`, err)
+    }
+    setLeagueTeams((prev) => {
+      const next = { ...prev, [code]: { teams, fetchedAt: Date.now() } }
+      localStorage.setItem('mochi-league-teams-cache-v2', JSON.stringify(next))
+      return next
+    })
+    setLoadingLeague(null)
+  }
+
   // Try the relative /api/usage first (works via the Vite dev-server
   // middleware when running `npm run dev` locally). That route doesn't
   // exist on static hosting (e.g. GitHub Pages), so fall back to the local
@@ -338,17 +425,18 @@ export default function App() {
     }
   }, [])
 
-  // Push usage to the device whenever it changes (not on every poll tick).
-  // The board has no RTC, so it can't compute "resets in Xh Ym" itself —
-  // we send minutes-remaining once and it counts down locally via millis().
-  // True while showing a Test Weather preview — suppresses all real API
-  // fetches so the test data on the device isn't overwritten. Cleared
+  // True while showing a Test Weather preview — suppresses the real API
+  // fetch so the test data on the device isn't overwritten. Cleared
   // automatically when weather mode is left.
   const [weatherTest, setWeatherTest] = useState(false)
   const weatherTestRef = useRef(weatherTest)
   useEffect(() => {
     weatherTestRef.current = weatherTest
   }, [weatherTest])
+
+  // Push usage to the device whenever it changes (not on every poll tick).
+  // The board has no RTC, so it can't compute "resets in Xh Ym" itself —
+  // we send minutes-remaining once and it counts down locally via millis().
   const lastSentUsageRef = useRef(null)
   useEffect(() => {
     if (!usage || !isConnected) return
@@ -577,6 +665,19 @@ export default function App() {
           })
         }
       }
+      else if (trimmed.startsWith('WEATHER_DATA ')) {
+        const parts = trimmed.substring(13).split(' ')
+        if (parts.length >= 5) {
+          const hasData = parts[0] === '1'
+          const temp = parseInt(parts[1], 10)
+          const feels = parseInt(parts[2], 10)
+          const humidity = parseInt(parts[3], 10)
+          const [cityName, condition] = parts.slice(4).join(' ').split('|')
+          if (hasData) {
+            setWeatherData({ temp, feels, humidity, condition: condition || '', cityName: cityName || '' })
+          }
+        }
+      }
     }
   }
 
@@ -658,6 +759,29 @@ export default function App() {
     return () => window.removeEventListener('click', handleOutsideClick)
   }, [showConfigMenu])
 
+  // Shared post-connect bootstrap for both a manual Connect click and the
+  // silent auto-reconnect on page load (see the mount effect below handleConnect).
+  const runPostConnectSync = async () => {
+    // Silently sync system time on connect — stays on whatever mode
+    // the device is currently showing (default Animation), no panel pop
+    const epoch = Math.floor(Date.now() / 1000)
+    await writeSerial(`T${epoch}\n`)
+    // Query status (alarms, usage, pomo state)
+    await writeSerial('Q\n')
+    // Favorite teams now persist on the device (NVS flash, see
+    // loadFavoriteTeamsFromFlash in clawd_mochi.ino) — this resend is
+    // just so a second browser's local picker state doesn't drift from
+    // what's actually saved on the device.
+    if (favoriteTeams.length > 0) {
+      await writeSerial(`F${favoriteTeams.join('|')}\n`)
+    }
+    // Weather location: device persists it to flash too (same reasoning
+    // as favorite teams above) — this resend just keeps a second
+    // browser's picker in sync with what's actually saved on the device.
+    const cleanLocName = removeVietnameseTones(selectedLocation.shortName || selectedLocation.name || '')
+    await writeSerial(`L${selectedLocation.lat},${selectedLocation.lon},${cleanLocName}\n`)
+  }
+
   const handleConnect = async () => {
     if (isConnected) {
       if (connectionType === 'bluetooth') {
@@ -695,18 +819,36 @@ export default function App() {
           )
         }
         setIsConnected(true)
-
-        // Silently sync system time on connect — stays on whatever mode
-        // the device is currently showing (default Animation), no panel pop
-        const epoch = Math.floor(Date.now() / 1000)
-        await writeSerial(`T${epoch}\n`)
-        // Query status (alarms, usage, pomo state)
-        await writeSerial('Q\n')
+        await runPostConnectSync()
       } catch (err) {
         alert(`Failed to connect to ESP32: ${err.message}`)
       }
     }
   }
+
+  // Auto-reconnect on page load using a Serial port this origin was already
+  // granted permission for in an earlier session (e.g. this tab opening at
+  // laptop login — see the OS autostart entry pointed at this site). No
+  // popup, no click. Runs once; if there's no unambiguous prior port it
+  // just falls through to the manual Connect button. Also pushes real
+  // weather right away (not just the location) — that's the one thing a
+  // fresh boot otherwise waits 2 minutes for (see the weather poll effect).
+  const autoConnectAttempted = useRef(false)
+  useEffect(() => {
+    if (autoConnectAttempted.current || isConnected || connectionType !== 'serial') return
+    autoConnectAttempted.current = true
+    ;(async () => {
+      const ok = await tryAutoConnectSerial(
+        () => setIsConnected(false),
+        handleSerialData
+      )
+      if (!ok) return
+      setIsConnected(true)
+      await runPostConnectSync()
+      setWeatherTest(false)
+      await handleFetchAndPushWeather(selectedLocation, false)
+    })()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWriteSerial = async (data) => {
     // Intercept alarm commands to manage list and sync closest automatically
@@ -785,6 +927,18 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
   }
 
+  // Tells the device's own background WiFi fetch (weather.ino) which
+  // lat/lon to use. The website is the primary weather source again (see
+  // handleFetchAndPushWeather below) — this 'L' push only keeps the
+  // device's fallback fetch (for whenever the browser isn't connected)
+  // pointed at the right location, not a data push itself.
+  const handlePushWeatherLocation = async (loc = selectedLocation) => {
+    const latVal = typeof loc.lat === 'number' && !isNaN(loc.lat) ? loc.lat : 0
+    const lonVal = typeof loc.lon === 'number' && !isNaN(loc.lon) ? loc.lon : 0
+    const cleanLocName = removeVietnameseTones(loc.shortName || loc.name || '')
+    await handleWriteSerial(`L${latVal},${lonVal},${cleanLocName}\n`)
+  }
+
   // Maps OpenWeather condition ID to a WMO-compatible code for the firmware's wmoToCondition()
   const owIdToWmo = (id) => {
     if (id === 800) return 0           // clear sky
@@ -799,6 +953,11 @@ export default function App() {
     return 2
   }
 
+  // Primary weather path: the browser fetches OpenWeatherMap and pushes the
+  // result straight to the device over serial ('W'), same as before the
+  // device grew its own WiFi fetch. Kept primary because it's instant and
+  // doesn't depend on this board's flaky WiFi — weather.ino only kicks in
+  // as a fallback when the browser isn't connected at all.
   const handleFetchAndPushWeather = async (loc = selectedLocation, switchToWeather = true) => {
     const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY
     try {
@@ -843,6 +1002,17 @@ export default function App() {
         setActiveMode('weather')
       }
     }
+  }
+
+  // Builds and sends the 'F' wire command (pipe-separated, cap 6 teams —
+  // matches MAX_FAVORITE_TEAMS in clawd_mochi.ino). Saves to localStorage
+  // so the picker survives a page reload.
+  const handlePushFavoriteTeams = async (teams = favoriteTeams) => {
+    const cleaned = teams.map(t => removeVietnameseTones(t).trim()).filter(Boolean).slice(0, MAX_FAVORITE_TEAMS)
+    setFavoriteTeams(cleaned)
+    setFavTeamsDraft(cleaned)
+    localStorage.setItem('mochi-favorite-teams', JSON.stringify(cleaned))
+    await handleWriteSerial(`F${cleaned.join('|')}\n`)
   }
 
   const handleSearchLocations = async (query) => {
@@ -893,10 +1063,10 @@ export default function App() {
   const handleLocationChange = (loc) => {
     setSelectedLocation(loc)
     localStorage.setItem('mochi-weather-location', JSON.stringify(loc))
-    
+
     // Add to recent locations list (avoid duplicates, max 5 items)
     setRecentLocations(prev => {
-      const filtered = prev.filter(item => 
+      const filtered = prev.filter(item =>
         !(item.lat === loc.lat && item.lon === loc.lon)
       )
       const updated = [loc, ...filtered].slice(0, 5)
@@ -904,7 +1074,10 @@ export default function App() {
       return updated
     })
 
-    // Push updated data to device without switching to weather mode
+    // Keep the device's fallback fetch pointed at the new location too.
+    handlePushWeatherLocation(loc)
+
+    // Push real data to device immediately (browser is the primary path)
     setWeatherTest(false)
     handleFetchAndPushWeather(loc, false)
   }
@@ -1052,6 +1225,12 @@ export default function App() {
         onLocationChange={handleLocationChange}
         onSearchLocations={handleSearchLocations}
         onDeleteRecentLocation={handleDeleteRecentLocation}
+        leagueTeams={leagueTeams}
+        loadingLeague={loadingLeague}
+        onLoadTeamsForLeague={loadTeamsForLeague}
+        favTeamsDraft={favTeamsDraft}
+        setFavTeamsDraft={setFavTeamsDraft}
+        onPushFavoriteTeams={handlePushFavoriteTeams}
       />
 
       {/* Bottom control chrome bar (Warm, low-contrast design) */}
@@ -1320,7 +1499,8 @@ export default function App() {
                       { label: 'Term', cmd: '4', mode: 'terminal' },
                       { label: 'Usage', cmd: '5', mode: 'usage' },
                       { label: 'Wx', cmd: '6', mode: 'weather' },
-                      { label: 'Sing', cmd: '7', mode: 'sing' }
+                      { label: 'Sing', cmd: '7', mode: 'sing' },
+                      { label: 'Scores', cmd: '8', mode: 'scores' }
                     ].map((item) => (
                       <button
                         key={item.cmd}

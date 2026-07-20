@@ -63,6 +63,7 @@ Instead of a form of buttons, the controller is a **room you interact with** —
 | 🌀 Spinning fan   | Pomodoro  | Focus / break timer                   |
 | 🖥️ Computer screen | Terminal  | Type freely on the device's screen    |
 | 🐱 Sleeping cat   | Usage     | Live Claude usage meter               |
+| ⚽ Scores         | Scores    | Live sports scores (see [command reference](#-firmware-command-reference)) |
 
 **How control works:** the page uses the **Web Serial API** (Chrome / Edge / Opera) to talk to the ESP32-C3 over the **USB-C cable** at 115200 baud. Click **Connect**, pick the port, and every hotspot/button sends the same single-character commands the firmware understands. Because Web Serial is a secure-context API, this works directly from the HTTPS site — no mixed-content issues, and it's immune to the C3's flaky radio.
 
@@ -83,7 +84,7 @@ npm run build   # production build into web/dist
 
 Every command is a single character, handled by `handleChar()` so **Serial and the web route behave identically**. Control over **Serial Monitor @ 115200** always works.
 
-**Modes** (switch anytime): `1` Animation · `2` Clock · `3` Pomodoro · `4` Terminal · `5` Usage
+**Modes** (switch anytime): `1` Animation · `2` Clock · `3` Pomodoro · `4` Terminal · `5` Usage · `8` Scores
 
 **Global:** `b` toggle backlight · `-` / `=` speed down / up
 
@@ -94,7 +95,9 @@ Expressions: `e` blink · `f` double-blink · `g` look-around · `h` wink · `i`
 Alarm and timer take an optional name after a space — e.g. `0730 Wake up`, `300 Tea` — shown on the flashing ring screen instead of `ALARM!` / `TIMER!` (no name → default).
 **Pomodoro:** `p` start/stop (runs in background) · `P` set + start (`MMSSB` digits)
 **Terminal:** type freely; `exit` + Enter leaves
-**Sync (sent by the web app, silent):** `T` set clock · `U` push usage stats
+**Sync (sent by the web app, silent):** `T` set clock · `U` push usage stats · `F` set favorite teams (`F<team1>|<team2>|...`)
+**Debug:** `D<index>` play an idle animation on demand · `Z` force an immediate Scores fetch, bypassing the 5min/2h timers (useful for checking each score API works without waiting on a real match — see Serial Monitor for per-source HTTP results)
+**Scores (`8`):** fetches all 12 football-data.org free-tier competitions (World Cup, Champions League, Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Euro Championship, Brasileirão, Primeira Liga, Eredivisie, Championship — fetched biggest-league-first so a busy day's shared slot budget favors them), plus NBA (balldontlie.io) and Europa League + VBA/Vietnamese Basketball (RapidAPI Flashscore) directly over WiFi, rotating one card at a time. Football-data/NBA fetches cover live matches AND the last 3 days of finished results (not just whatever happens to be live at the exact fetch moment — nearly always nothing, especially out of season), skipping scheduled/postponed games. Europa League/VBA (RapidAPI Flashscore) is live-only for now — no recent-results lookback yet, since that'd need a separate, still-unverified endpoint. A live game involving a team from the `F` list is pinned instead of rotated past. Requires `FOOTBALL_DATA_API_KEY` / `BALLDONTLIE_API_KEY` / `RAPIDAPI_FLASHSCORE_KEY` in `secrets.h` — any left blank just skips that source. The RapidAPI key is polled far less often (every 2h vs 5min) since its free plan caps out at 500 requests/month, shared across Europa League + VBA.
 
 > No RTC — the clock runs off `millis()` and defaults to `00:00` until set (manually over Serial, or automatically via WiFi+NTP if configured — see [Connectivity](#-connectivity)).
 
@@ -135,7 +138,7 @@ Alarm and timer take an optional name after a space — e.g. `0730 Wake up`, `30
 
 1. Install [Arduino IDE 2.x](https://www.arduino.cc/en/software).
 2. **Boards Manager URL** → `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`, then install **esp32 by Espressif Systems**.
-3. **Library Manager** → install **Adafruit GFX Library** and **Adafruit ST7735 and ST7789 Library**.
+3. **Library Manager** → install **Adafruit GFX Library**, **Adafruit ST7735 and ST7789 Library**, and **ArduinoJson** (needed by `scores.ino`).
 4. **Tools** settings:
 
    | Setting         | Value                |
@@ -153,7 +156,7 @@ Alarm and timer take an optional name after a space — e.g. `0730 Wake up`, `30
 
 **Control** is always over **USB Web Serial / Serial @ 115200** — that's how the web controller talks to the device, and it's the only control surface. There's no embedded control page and no WiFi AP.
 
-**WiFi** is used for exactly one thing: a background **NTP time sync**, purely as a backup for the `t`/`T` Serial time-set commands. Copy [`clawd_mochi/secrets.h.example`](clawd_mochi/secrets.h.example) to `clawd_mochi/secrets.h` and fill in `STA_SSID` / `STA_PASS` to join your home WiFi (2.4 GHz) — the device connects in the background and fills in real wall-clock time (`wifi_time.ino`) as soon as it syncs. `secrets.h` is gitignored so your real credentials never get committed. `clawd_mochi.ino` `#include`s `secrets.h`, so **the file must exist to compile** — copy the example even if you're leaving it blank. Blank credentials just skip WiFi altogether; the clock then behaves exactly as before (`millis()`-based, set manually over Serial).
+**WiFi** backs four things, all optional and all best-effort: a background **NTP time sync** (backup for the `t`/`T` Serial time-set commands, `wifi_time.ino`), a direct HTTPS pull of Claude usage stats (`wifi_sync.ino`), direct HTTPS pulls of live sports scores for Scores mode (`scores.ino`, see [Firmware command reference](#-firmware-command-reference)), and a direct HTTPS pull of current weather (`weather.ino`) — this last one is a fallback only, since the web app pushing weather over Serial (`W`) is the primary, instant path; `weather.ino` just fills in when the browser isn't connected. None of these are control surfaces — Serial remains the only way to command the device. Copy [`clawd_mochi/secrets.h.example`](clawd_mochi/secrets.h.example) to `clawd_mochi/secrets.h` and fill in `STA_SSID` / `STA_PASS` to join your home WiFi (2.4 GHz), plus whichever API keys you want (`CLAUDE_ACCESS_TOKEN`, `FOOTBALL_DATA_API_KEY`, `BALLDONTLIE_API_KEY`, `RAPIDAPI_FLASHSCORE_KEY`, `OPENWEATHER_API_KEY`). `secrets.h` is gitignored so your real credentials never get committed. `clawd_mochi.ino` `#include`s `secrets.h`, so **the file must exist to compile** — copy the example even if you're leaving every field blank. Any blank field just skips that feature; the clock falls back to `millis()`-based/manual-Serial time, and each score/weather source is silently skipped.
 
 > ⚠️ **This board's radio is flaky.** The ESP32-C3 Super Mini has a known antenna limitation that makes WiFi weak/intermittent over the air — not a setting you can fix (CPU frequency does **not** change this). The NTP sync is written to retry quietly in the background and never blocks anything if it fails; control always works over **USB / Serial**, WiFi or not.
 

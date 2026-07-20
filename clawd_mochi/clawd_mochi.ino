@@ -92,6 +92,38 @@
 enum InputKind { INPUT_NONE, INPUT_CLOCK_SET, INPUT_ALARM_SET, INPUT_TIMER_SEC, INPUT_POMO_WORK, INPUT_POMO_BREAK };
 enum WeatherCondition { WC_CLEAR, WC_CLOUDY, WC_FOG, WC_RAIN, WC_STORM, WC_SNOWY, WC_WINDY };
 
+// ── Live Sports Scores types (scores.ino) — must live this early so
+// Arduino's auto-generated function prototypes (inserted right after the
+// includes, before anything else in the sketch) can see these custom
+// types; same reason WeatherCondition sits up here instead of near wx. ──
+// Order matters: SL_UCL..SL_ELC are exactly the 12 football-data.org
+// competitions (clearScoreEntriesForSource in scores.ino relies on them
+// being contiguous), listed big-league-first — combined with fetching
+// them in this same order, whichever leagues have live matches fill the
+// shared scoreEntries[] cap before smaller leagues get a look-in.
+enum ScoreLeague {
+  SL_WC, SL_UCL, SL_PL, SL_LALIGA, SL_BUNDESLIGA, SL_SERIEA, SL_LIGUE1,
+  SL_EC, SL_BSA, SL_PPL, SL_DED, SL_ELC,
+  SL_UEL, SL_NBA, SL_VBA, SL_COUNT
+};
+struct ScoreEntry {
+  ScoreLeague league;
+  char home[24];
+  char away[24];
+  int8_t homeScore;   // -1 = not started yet
+  int8_t awayScore;
+  char status[12];    // e.g. "67'", "HT", "FT", "21:00"
+  bool isLive;
+  bool valid;
+};
+struct FlashscoreTournament {
+  const char* searchName;
+  uint8_t sportId;  // RapidAPI Flashscore sport id: 1=Soccer, 3=Basketball (confirmed via playground)
+  ScoreLeague league;
+  char cachedId[16];  // e.g. "ClDjv3V5" (Europa League, confirmed)
+  bool idCached;
+};
+
 // ── WiFi (optional, background NTP time backup — see wifi_time.ino) ────
 // Credentials live in secrets.h (gitignored, not committed) so a real WiFi
 // password never lands in git history. Copy secrets.h.example to secrets.h
@@ -232,7 +264,7 @@ uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_GREEN;
 #define C_BLACK ST77XX_BLACK
 
 // ── Modes ─────────────────────────────────────────────────────
-enum Mode { MODE_ANIMATION, MODE_CLOCK, MODE_POMODORO, MODE_TERMINAL, MODE_USAGE, MODE_WEATHER, MODE_SING };
+enum Mode { MODE_ANIMATION, MODE_CLOCK, MODE_POMODORO, MODE_TERMINAL, MODE_USAGE, MODE_WEATHER, MODE_SING, MODE_SCORES };
 Mode currentMode = MODE_ANIMATION;
 
 // ── Animation-mode sub-state ──────────────────────────────────
@@ -309,6 +341,7 @@ void saveAlarmsToFlash() {
   preferences.end();
   Serial.println("Alarms saved to Flash NVS.");
 }
+
 
 bool     alarmArmed    = false;
 bool     alarmRinging    = false;
@@ -414,6 +447,94 @@ String wxCondStr = "";
 // Weather collection state
 bool wxCollecting = false;
 String wxBuf = "";
+
+// Weather location, pushed once from the web app via 'L' (a control action,
+// not a data push — the device fetches the actual weather itself, same
+// pattern as favoriteTeams below for scores.ino). Persisted to flash so it
+// survives reboot; defaults to Ho Chi Minh City to match the web app's own
+// default location.
+float  wxLat = 10.823;
+float  wxLon = 106.630;
+bool   locCollecting = false;
+String locBuf = "";
+
+void loadWeatherLocationFromFlash() {
+  preferences.begin("clawd-wx", false);
+  wxLat = preferences.getFloat("lat", 10.823);
+  wxLon = preferences.getFloat("lon", 106.630);
+  wxLoc = preferences.getString("name", "Ho Chi Minh City");
+  preferences.end();
+}
+
+void saveWeatherLocationToFlash() {
+  preferences.begin("clawd-wx", false);
+  preferences.putFloat("lat", wxLat);
+  preferences.putFloat("lon", wxLon);
+  preferences.putString("name", wxLoc);
+  preferences.end();
+}
+
+// ── Live Sports Scores State (scores.ino) ──────────────────────
+// ScoreLeague/ScoreEntry/FlashscoreTournament type definitions live up near
+// WeatherCondition (top of file) — Arduino's auto-generated function
+// prototypes get inserted before this point, so any custom type used in a
+// cross-file function signature (e.g. fetchFootballDataCompetition's
+// ScoreLeague parameter) must already be visible up there or the build
+// fails with "'ScoreLeague' has not been declared".
+#define MAX_SCORE_ENTRIES 100   // wider -3..+7 day range now, plus a busy multi-match Saturday across 15 leagues
+ScoreEntry scoreEntries[MAX_SCORE_ENTRIES];
+uint8_t scoreEntryCount = 0;
+
+// Favorite teams, pushed from the web app via 'F' and persisted to NVS
+// flash (same Preferences pattern as alarmsList above, own namespace) —
+// survives reboot; web app resends on connect too, mainly so a second
+// browser's picker state doesn't drift from what's actually saved here.
+#define MAX_FAVORITE_TEAMS 6
+char favoriteTeams[MAX_FAVORITE_TEAMS][24];
+uint8_t favoriteTeamCount = 0;
+bool favTeamsCollecting = false;
+String favTeamsBuf = "";
+
+void loadFavoriteTeamsFromFlash() {
+  preferences.begin("clawd-favs", false);
+  favoriteTeamCount = preferences.getUChar("count", 0);
+  if (favoriteTeamCount > MAX_FAVORITE_TEAMS) favoriteTeamCount = MAX_FAVORITE_TEAMS;
+  for (int i = 0; i < MAX_FAVORITE_TEAMS; i++) {
+    String key = "fav_" + String(i);
+    size_t len = preferences.getBytes(key.c_str(), favoriteTeams[i], sizeof(favoriteTeams[i]));
+    if (len != sizeof(favoriteTeams[i])) memset(favoriteTeams[i], 0, sizeof(favoriteTeams[i]));
+  }
+  preferences.end();
+  Serial.printf("Favorite teams loaded from Flash NVS (%d).\n", favoriteTeamCount);
+}
+
+void saveFavoriteTeamsToFlash() {
+  preferences.begin("clawd-favs", false);
+  preferences.putUChar("count", favoriteTeamCount);
+  for (int i = 0; i < MAX_FAVORITE_TEAMS; i++) {
+    String key = "fav_" + String(i);
+    preferences.putBytes(key.c_str(), favoriteTeams[i], sizeof(favoriteTeams[i]));
+  }
+  preferences.end();
+  Serial.println("Favorite teams saved to Flash NVS.");
+}
+
+// Tracks live favorite-team matches across fetch cycles so scores.ino can
+// detect kickoff/goal events and trigger the Scores-screen auto-notify in
+// checkFavoriteNotifyInterrupt() below. Not a signature type (no cross-file
+// function takes it by value/reference), so no early-declaration constraint
+// like ScoreLeague/ScoreEntry above — fine to live here with the rest of
+// the favorite-team state.
+#define MAX_TRACKED_FAVORITE_MATCHES 4
+struct FavoriteMatchTrack {
+  char home[24];
+  char away[24];
+  int8_t homeScore;
+  int8_t awayScore;
+  bool valid;  // slot in use
+};
+FavoriteMatchTrack favoriteTrack[MAX_TRACKED_FAVORITE_MATCHES];
+bool pendingFavoriteNotify = false;
 
 // Weather animation globals
 struct Drop {
@@ -629,6 +750,8 @@ void setup() {
   initMQTT();
   randomSeed(esp_random());
   loadAlarmsFromFlash();
+  loadFavoriteTeamsFromFlash();
+  loadWeatherLocationFromFlash();
 
   // Set the Vietnam (ICT, UTC+7) offset unconditionally, up front, via the
   // plain libc mechanism (no network/SNTP touched — safe before WiFi is
@@ -673,7 +796,7 @@ void setup() {
   idlePhaseDur = random(30, 90) * 1000UL;  // first glance in 30-90 s
 
   Serial.println("Clawd Mochi ready.");
-  Serial.println("Modes: 1=Animation 2=Clock 3=Pomodoro 4=Terminal 5=Usage 6=Weather");
+  Serial.println("Modes: 1=Animation 2=Clock 3=Pomodoro 4=Terminal 5=Usage 6=Weather 7=Sing 8=Scores");
   Serial.println("Global: b=toggle backlight  -/+ =speed down/up");
   Serial.println("Animation mode: w=normal s=squish z=logo m=dynamic");
   Serial.println("  e=blink f=double-blink g=look-around h=wink i=sleepy");
@@ -683,6 +806,8 @@ void setup() {
   Serial.println("Pomodoro mode: p=start/stop  P=MMSSB set+start (keeps ticking in background)");
   Serial.println("Terminal mode: type freely; \"exit\"+Enter to leave");
   Serial.println("Sing mode (7): q/w/e/r/t/y pick song  space=play/pause  x=stop  m=loop");
+  Serial.println("Scores mode (8): rotates live scores; F<team1>|<team2>|... sets favorites");
+  Serial.println("  Z forces an immediate scores fetch (debug/test, skips the 5min/2h wait)");
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -736,6 +861,27 @@ void manageIdleCycle() {
   }
 }
 
+// Auto-switches to Scores mode for ~15s when a favorite team's match kicks
+// off or its score changes (pendingFavoriteNotify, set by
+// checkFavoriteMatchChanges() in scores.ino) — even interrupting an
+// in-progress Clock/Weather idle-glance, but never Pomodoro/Terminal/Sing/
+// an active alarm, matching maybeAutoShowUsage()'s restraint below. Reuses
+// the same idlePhase/idlePhaseAt/idlePhaseDur state manageIdleCycle()
+// already drives, so it naturally returns to Animation afterward via that
+// function's existing "done glancing" path — no separate timer needed.
+void checkFavoriteNotifyInterrupt() {
+  if (busy || alarmRinging || pomodoroRinging || timerRinging) return;
+  if (!pendingFavoriteNotify) return;
+  if (currentMode != MODE_ANIMATION && currentMode != MODE_CLOCK &&
+      currentMode != MODE_WEATHER && currentMode != MODE_USAGE) return;
+
+  pendingFavoriteNotify = false;
+  switchMode(MODE_SCORES);
+  idlePhase    = 1;
+  idlePhaseAt  = millis();
+  idlePhaseDur = 15000;
+}
+
 // Auto-popup the Usage screen (Animation mode only) the first time usage
 // crosses each new 10% mark, plus a special one at 95% as a final warning
 // before the limit. Uses whichever of session/weekly is higher, since
@@ -762,6 +908,8 @@ void loop() {
   updateWifiTime();
   updateMQTT();
   updateWiFiSync();
+  updateScores();
+  updateWeather();
 
   checkAlarm();
   updateAlarmFlash();
@@ -772,11 +920,13 @@ void loop() {
     updatePomoFlash();
     updatePomodoroIdleAnim();
     checkPomodoroTimeout();
+    checkFavoriteNotifyInterrupt();
     manageIdleCycle();
     maybeAutoShowUsage();
     updateClockViewIfShown();
     updateUsageViewIfShown();
     if (currentMode == MODE_WEATHER) updateWeatherView();
+    if (currentMode == MODE_SCORES) updateScoresViewIfShown();
     updateSing();
     updateSingView();
 

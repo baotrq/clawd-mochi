@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import mascotIcon from '../assets/ezgif-frame-016.png'
+import { LEAGUE_GROUPS, MAX_FAVORITE_TEAMS, SPORTS } from '../lib/leagues.js'
 
 function formatCowsay(text = 'moo') {
   const maxWordLen = 28
@@ -127,9 +128,26 @@ export default function ControlPanel({
   onLocationChange,
   onSearchLocations,
   onDeleteRecentLocation,
+  leagueTeams = {},
+  loadingLeague,
+  onLoadTeamsForLeague,
+  favTeamsDraft = [],
+  setFavTeamsDraft,
+  onPushFavoriteTeams,
 }) {
   const returnToIdleRef = useRef(null)
   useEffect(() => () => { if (returnToIdleRef.current) clearTimeout(returnToIdleRef.current) }, [])
+
+  // Sport → league dropdown selection for the Scores panel's team picker.
+  const [pickerSport, setPickerSport] = useState('football')
+  const [pickerLeague, setPickerLeague] = useState('PL')
+  const leaguesForSport = LEAGUE_GROUPS.filter((g) => g.sport === pickerSport)
+
+  // Fetch that league's roster whenever the dropdown selection changes
+  // (cached 24h by the caller — see loadTeamsForLeague in App.jsx).
+  useEffect(() => {
+    if (activeMode === 'scores') onLoadTeamsForLeague?.(pickerLeague)
+  }, [activeMode, pickerLeague])
 
   const handleExpressionClick = (cmd) => {
     if (returnToIdleRef.current) clearTimeout(returnToIdleRef.current)
@@ -430,6 +448,7 @@ export default function ControlPanel({
           {activeMode === 'usage' && 'Claude Usage'}
           {activeMode === 'weather' && 'Weather Station'}
           {activeMode === 'sing' && 'Sing Mode'}
+          {activeMode === 'scores' && 'Live Scores'}
         </span>
         <button
           onClick={onClose}
@@ -1255,6 +1274,131 @@ export default function ControlPanel({
           </div>
         </div>
       )}
+
+      {activeMode === 'scores' && (() => {
+        const entry = leagueTeams[pickerLeague]
+        const teams = entry?.teams || []
+        const isLoading = loadingLeague === pickerLeague
+        const failed = entry && !isLoading && teams.length === 0
+
+        return (
+          <div className="space-y-3">
+            <div className="text-[10px] text-ascii-mid leading-relaxed text-center">
+              The device fetches live scores + recent/upcoming results across
+              15 leagues on its own. Pick favorite teams below — a live game
+              involving one gets pinned on screen instead of rotated past.
+            </div>
+
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[9px] text-ascii-dim uppercase font-bold select-none">Favorite Teams</span>
+              <span className={`text-[9px] font-mono font-bold ${favTeamsDraft.length >= MAX_FAVORITE_TEAMS ? 'text-orange-400' : 'text-ascii-mid'}`}>
+                {favTeamsDraft.length}/{MAX_FAVORITE_TEAMS}
+              </span>
+            </div>
+
+            {favTeamsDraft.length > 0 && (
+              <div className="flex flex-wrap gap-1 px-1">
+                {favTeamsDraft.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => setFavTeamsDraft((prev) => prev.filter((t) => t !== name))}
+                    className="text-[9px] bg-ascii-spark/10 border border-ascii-spark/40 text-ascii-spark rounded px-1.5 py-0.5 cursor-pointer hover:bg-red-950/30 hover:border-red-800/50 hover:text-red-400 transition-colors"
+                    title="Remove"
+                  >
+                    {name} ✕
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Sport / league dropdowns */}
+            <div className="grid grid-cols-2 gap-2 px-1">
+              <select
+                value={pickerSport}
+                onChange={(e) => {
+                  const sport = e.target.value
+                  setPickerSport(sport)
+                  const first = LEAGUE_GROUPS.find((g) => g.sport === sport)
+                  if (first) setPickerLeague(first.code)
+                }}
+                className="bg-ascii-dim/10 border border-ascii-mid/20 rounded px-2 py-1 text-ascii-bright font-mono text-[9px] cursor-pointer focus:outline-none focus:border-[#e05f3e]"
+              >
+                {SPORTS.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+              <select
+                value={pickerLeague}
+                onChange={(e) => setPickerLeague(e.target.value)}
+                className="bg-ascii-dim/10 border border-ascii-mid/20 rounded px-2 py-1 text-ascii-bright font-mono text-[9px] cursor-pointer focus:outline-none focus:border-[#e05f3e]"
+              >
+                {leaguesForSport.map((g) => (
+                  <option key={g.code} value={g.code}>{g.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Team checkboxes for the selected league only */}
+            <div className="h-48 overflow-y-auto scrollbar-none pr-0.5">
+              {isLoading && (
+                <div className="text-[10px] text-ascii-mid italic text-center py-6">Loading {leaguesForSport.find((g) => g.code === pickerLeague)?.label}…</div>
+              )}
+              {failed && (
+                <div className="text-[10px] text-red-400 text-center py-6 px-2 leading-relaxed">
+                  Couldn't load this league's roster.
+                  <button
+                    onClick={() => onLoadTeamsForLeague?.(pickerLeague)}
+                    className="block mx-auto mt-2 text-ascii-spark underline cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {!isLoading && !failed && (
+                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                  {teams.map((name) => {
+                    const checked = favTeamsDraft.includes(name)
+                    const disabled = !checked && favTeamsDraft.length >= MAX_FAVORITE_TEAMS
+                    return (
+                      <label
+                        key={name}
+                        className={`flex items-center gap-1.5 px-1 py-0.5 rounded text-[9px] cursor-pointer transition-colors ${
+                          disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-ascii-bright/5'
+                        } ${checked ? 'text-ascii-spark font-bold' : 'text-ascii-bright/70'}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => {
+                            setFavTeamsDraft((prev) =>
+                              prev.includes(name) ? prev.filter((t) => t !== name) : [...prev, name].slice(0, MAX_FAVORITE_TEAMS)
+                            )
+                          }}
+                          className="accent-[#e05f3e] cursor-pointer"
+                        />
+                        <span className="truncate">{name}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => onPushFavoriteTeams?.(favTeamsDraft)}
+              className="w-full text-center px-2 py-1.5 rounded bg-ascii-bright/5 border border-ascii-mid/15 hover:border-ascii-spark hover:text-ascii-spark text-ascii-bright/80 transition-all cursor-pointer text-[10px] font-bold"
+            >
+              💾 Save & Push Favorites
+            </button>
+            <div className="text-[8px] text-ascii-dim px-1 select-none text-center">
+              Saved to the device's flash — survives reboot. Still resent
+              from here on connect too, so a second browser's picker
+              doesn't drift from what's actually saved.
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

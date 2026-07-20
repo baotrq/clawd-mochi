@@ -36,3 +36,4 @@ __pycache__/
 
 # Firmware WiFi credentials (see clawd_mochi/secrets.h.example)
 clawd_mochi/secrets.h
+test_scores_api/secrets.h
